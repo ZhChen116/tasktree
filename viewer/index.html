@@ -1,96 +1,134 @@
 <title>动态记事本</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <style>
-/* Layout: nested circles (circle packing) of the whole tree; tap a circle to zoom into it,
-   tap outside to zoom out. Below: the selected node's card, then decisions and recent activity. */
+/* Layout: a "map of work" — nested circles of the whole tree on a soft stage (left), the selected
+   node's card beside it (right; stacked on phones), decisions and activity below.
+   Visual idea: a quiet slate ground; status colors are muted inks; parents are tinted glass rings
+   of their most urgent status; leaves are small lit beads; names sit on paper pills. */
 :root {
-  --bg: #f2f4f7; --panel: #ffffff; --fg: #1a2029; --muted: #5c6773; --rule: #d9e0e7;
-  --accent: #2f5f8f; --done: #2f7d5b; --doing: #c98a1b; --wait: #8a939d; --blocked: #b8483a; --decide: #7a4fb0;
-  --chip-bg: #ecf0f4; --l0: #e6ebf1; --l1: #f6f8fa; --l2: #eef2f6; --l3: #f8fafb;
+  --bg: #eef1f4; --panel: #fbfcfd; --fg: #1d2430; --muted: #66717d; --rule: #dde3ea;
+  --accent: #3a5f8a;
+  --decide: #7a5bd0; --blocked: #cc5a4c; --doing: #d99a35; --waiting: #98a3af; --done: #5a9f7e;
+  --stage-hi: #ffffff; --stage-lo: #e6ebf1; --pill: #ffffffee; --pill-fg: #1d2430; --shadow: rgba(24, 39, 60, .18);
+  --chip-bg: #edf1f5;
+  --display: "Noto Serif SC", "Songti SC", serif;
   --sans: "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #10141a; --panel: #19202a; --fg: #e4e9ef; --muted: #97a2ae; --rule: #29323d;
-  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #7f8a96; --blocked: #e0796b; --decide: #b693e6;
-  --chip-bg: #222a34; --l0: #141a22; --l1: #1d252f; --l2: #232c37; --l3: #2a3440; color-scheme: dark } }
+  --bg: #0e131a; --panel: #151c25; --fg: #e6ebf1; --muted: #93a0ad; --rule: #263140;
+  --accent: #8db6df;
+  --decide: #a88bf0; --blocked: #ea8273; --doing: #ecb456; --waiting: #7f8b98; --done: #6fc29a;
+  --stage-hi: #1c2633; --stage-lo: #0f151d; --pill: #1b2430ee; --pill-fg: #e6ebf1; --shadow: rgba(0, 0, 0, .45);
+  --chip-bg: #1f2833; color-scheme: dark } }
 :root[data-theme="dark"] {
-  --bg: #10141a; --panel: #19202a; --fg: #e4e9ef; --muted: #97a2ae; --rule: #29323d;
-  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #7f8a96; --blocked: #e0796b; --decide: #b693e6;
-  --chip-bg: #222a34; --l0: #141a22; --l1: #1d252f; --l2: #232c37; --l3: #2a3440; color-scheme: dark }
+  --bg: #0e131a; --panel: #151c25; --fg: #e6ebf1; --muted: #93a0ad; --rule: #263140;
+  --accent: #8db6df;
+  --decide: #a88bf0; --blocked: #ea8273; --doing: #ecb456; --waiting: #7f8b98; --done: #6fc29a;
+  --stage-hi: #1c2633; --stage-lo: #0f151d; --pill: #1b2430ee; --pill-fg: #e6ebf1; --shadow: rgba(0, 0, 0, .45);
+  --chip-bg: #1f2833; color-scheme: dark }
 body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
-.wrap { max-width: 820px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 40px; display: grid; gap: 12px; }
-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-h1 { font-size: 1.3rem; margin: 0; display: flex; align-items: center; gap: 10px; }
-h2 { font-size: 1rem; margin: 0 0 8px; }
-.stamp { color: var(--muted); font-size: .8rem; }
-.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: .88rem; min-height: 30px; }
-.crumbs button { font: inherit; border: 1px solid var(--rule); background: var(--panel); color: var(--accent); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
-.crumbs b { font-weight: 500; padding: 2px 4px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 18px 44px; display: grid; gap: 16px; }
+header { display: grid; gap: 4px; }
+.titlebar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 1.6rem; margin: 0; letter-spacing: .04em; }
+.summary { font-size: .9rem; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+.summary b { font-family: var(--mono); font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
+.summary .k { display: inline-flex; align-items: center; gap: 6px; }
+.stamp { color: var(--muted); font-size: .78rem; margin-left: auto; }
+.main { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 820px) { .main { grid-template-columns: minmax(0, 1.45fr) minmax(280px, 1fr); } .side { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); } }
+.stage { position: relative; border-radius: 20px; overflow: hidden; background: radial-gradient(120% 90% at 50% 35%, var(--stage-hi), var(--stage-lo)); box-shadow: 0 1px 0 var(--rule) inset, 0 10px 30px -18px var(--shadow); }
+.crumbs { position: absolute; left: 12px; top: 10px; right: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: .82rem; z-index: 2; pointer-events: none; }
+.crumbs > * { pointer-events: auto; }
+.crumbs button { font: inherit; border: 0; background: var(--pill); color: var(--accent); border-radius: 999px; padding: 2px 10px; cursor: pointer; box-shadow: 0 1px 3px var(--shadow); }
+.crumbs b { font-weight: 500; background: var(--pill); border-radius: 999px; padding: 2px 10px; box-shadow: 0 1px 3px var(--shadow); }
 .sep { color: var(--muted); }
-.stage { position: relative; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; }
 svg#pack { display: block; width: 100%; height: auto; cursor: zoom-out; }
-svg#pack circle { cursor: pointer; }
-svg#pack text { font-family: var(--sans); pointer-events: none; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; fill: var(--fg); }
-svg#pack text.sub { font-family: var(--mono); fill: var(--muted); }
-.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: .74rem; color: var(--muted); padding: 6px 12px 8px; border-top: 1px solid var(--rule); }
-.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
-.ring { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; border: 2px solid var(--doing); box-sizing: border-box; }
-.s-done { background: var(--done); } .s-doing { background: var(--doing); } .s-waiting { background: var(--wait); }
+svg#pack .node { cursor: pointer; transition: filter .2s; }
+svg#pack .node:hover { filter: brightness(1.06); }
+svg#pack .pill rect { fill: var(--pill); }
+svg#pack .pill text { font-family: var(--sans); fill: var(--pill-fg); }
+svg#pack .pill text.ws { font-family: var(--display); }
+svg#pack .pill text.n { font-family: var(--mono); fill: var(--muted); }
+svg#pack .pill { pointer-events: none; }
+@keyframes halo { from { stroke-opacity: .55; stroke-width: 2px; } to { stroke-opacity: 0; stroke-width: 14px; } }
+svg#pack .halo { fill: none; stroke: var(--decide); animation: halo 2.2s ease-out infinite; pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .74rem; color: var(--muted); padding: 8px 4px 0; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.s-done { background: var(--done); } .s-doing { background: var(--doing); } .s-waiting { background: var(--waiting); }
 .s-blocked { background: var(--blocked); } .s-decide { background: var(--decide); }
-.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; min-width: 0; }
-.card .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.card .ttl { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+.card { background: var(--panel); border-radius: 16px; padding: 16px 18px; display: grid; gap: 10px; min-width: 0; box-shadow: 0 1px 0 var(--rule) inset, 0 10px 30px -20px var(--shadow); border-top: 4px solid var(--st, var(--rule)); }
+.card .eyebrow { font-size: .74rem; letter-spacing: .08em; color: var(--muted); }
+.card .ttl { font-family: var(--display); font-weight: 700; font-size: 1.25rem; line-height: 1.35; overflow-wrap: anywhere; text-wrap: balance; }
+.card .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .card a { color: var(--accent); font-size: .86rem; }
-.chip { font-size: .74rem; padding: 1px 8px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); white-space: nowrap; }
-.chip.st { color: var(--fg); }
-.next { font-size: .88rem; color: var(--muted); overflow-wrap: anywhere; }
-.next b { color: var(--fg); font-weight: 500; }
-.blk { font-size: .82rem; color: var(--blocked); }
-.kids { display: grid; gap: 4px; }
-.kid { font: inherit; font-size: .86rem; display: flex; align-items: center; gap: 6px; text-align: left; border: 0; border-top: 1px solid var(--rule); background: none; color: var(--fg); padding: 6px 2px; cursor: pointer; min-width: 0; }
+.chip { font-size: .74rem; padding: 2px 9px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); white-space: nowrap; }
+.chip.st { color: #fff; background: var(--st, var(--waiting)); }
+.next { font-size: .9rem; color: var(--fg); background: var(--chip-bg); border-radius: 10px; padding: 8px 10px; overflow-wrap: anywhere; }
+.next b { font-weight: 500; color: var(--muted); margin-right: 6px; font-size: .78rem; letter-spacing: .06em; }
+.blk { font-size: .84rem; color: var(--blocked); }
+.bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--chip-bg); }
+.bar i { display: block; height: 100%; }
+.kids { display: grid; }
+.kid { font: inherit; font-size: .88rem; display: flex; align-items: center; gap: 10px; text-align: left; border: 0; border-top: 1px solid var(--rule); background: none; color: var(--fg); padding: 8px 2px; cursor: pointer; min-width: 0; }
+.kid:hover .t { color: var(--accent); }
 .kid span.t { flex: 1; overflow-wrap: anywhere; }
-.kid span.c { font-family: var(--mono); font-size: .74rem; color: var(--muted); }
+.kid span.c { font-family: var(--mono); font-size: .74rem; color: var(--muted); white-space: nowrap; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.cols { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; min-width: 0; }
-.dcard { border-left: 3px solid var(--decide); padding: 4px 0 4px 10px; display: grid; gap: 5px; margin-bottom: 10px; }
-.dcard .q { font-weight: 500; cursor: pointer; }
+.cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.panel { background: var(--panel); border-radius: 16px; padding: 14px 18px; min-width: 0; box-shadow: 0 1px 0 var(--rule) inset; }
+h2 { font-family: var(--display); font-size: 1.02rem; margin: 0 0 10px; letter-spacing: .04em; }
+.dcard { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.dcard:first-child { border-top: 0; padding-top: 0; }
+.dcard .q { font-weight: 500; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+.dcard .q:hover { color: var(--accent); }
+.path { font-size: .78rem; color: var(--muted); }
 .opts { display: flex; flex-wrap: wrap; gap: 6px; }
-button.opt { font: inherit; font-size: .84rem; border: 1px solid var(--rule); background: var(--chip-bg); color: var(--fg); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
-button.opt.chosen { border-color: var(--decide); color: var(--decide); font-weight: 500; }
+button.opt { font: inherit; font-size: .84rem; border: 1px solid var(--rule); background: var(--panel); color: var(--fg); border-radius: 999px; padding: 3px 14px; cursor: pointer; }
+button.opt:hover { border-color: var(--decide); color: var(--decide); }
+button.opt.chosen { border-color: var(--decide); background: var(--decide); color: #fff; }
 .answered { font-size: .8rem; color: var(--decide); }
 .empty { color: var(--muted); font-size: .88rem; }
-ol.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-ol.log li { display: grid; grid-template-columns: 6.8em 1fr; gap: 8px; font-size: .85rem; min-width: 0; }
+ol.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+ol.log li { display: grid; grid-template-columns: 6.6em 1fr; gap: 10px; font-size: .86rem; min-width: 0; }
 ol.log time { font-family: var(--mono); font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
 ol.log span { overflow-wrap: anywhere; }
-#refreshBtn { border: 1px solid var(--rule); background: var(--panel); color: var(--accent); border-radius: 999px; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
-#refreshMsg { font-size: .78rem; font-weight: 400; color: var(--muted); }
-label.tog { font-size: .8rem; color: var(--muted); display: inline-flex; gap: 5px; align-items: center; }
+#refreshBtn { border: 0; background: var(--panel); color: var(--accent); border-radius: 999px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; box-shadow: 0 1px 3px var(--shadow); }
+#refreshMsg { font-size: .78rem; color: var(--muted); }
+label.tog { font-size: .78rem; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { svg#pack .halo { animation: none; stroke-opacity: .5; } svg#pack .node { transition: none; } }
 </style>
 
 <div class="wrap">
   <header>
-    <h1 id="treeTitle">动态记事本<button id="refreshBtn" type="button" title="让 Claude 同步" aria-label="让 Claude 同步"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span id="refreshMsg"></span></h1>
-    <div class="stamp" id="stamp">正在读取…</div>
+    <div class="titlebar">
+      <h1 id="treeTitle">动态记事本</h1>
+      <button id="refreshBtn" type="button" title="让 Claude 同步" aria-label="让 Claude 同步"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <span id="refreshMsg"></span>
+      <span class="stamp" id="stamp">正在读取…</span>
+    </div>
+    <div class="summary" id="summary"></div>
   </header>
 
-  <div class="crumbs" id="crumbs" aria-label="位置"></div>
-
-  <div class="stage">
-    <svg id="pack" role="img" aria-label="所有事情的嵌套圆：大圆是工作线，里面的小圆是项目和任务。点一个圆放大进去，点空白处退出一层。"></svg>
-    <div class="legend" aria-hidden="true">
-      <span><i class="dot s-decide"></i>等你决定</span><span><i class="dot s-blocked"></i>卡住</span>
-      <span><i class="dot s-doing"></i>在做</span><span><i class="dot s-waiting"></i>等待</span><span><i class="dot s-done"></i>完成</span>
-      <span><i class="ring"></i>圈的边框 = 里面最急的状态</span><span>点圆放大 · 点空白退出</span>
+  <div class="main">
+    <div>
+      <div class="stage">
+        <div class="crumbs" id="crumbs" aria-label="位置"></div>
+        <svg id="pack" role="img" aria-label="所有事情的嵌套圆：大圆是工作线，里面的小圆是项目和任务。点一个圆放大进去，点空白处退出一层。"></svg>
+      </div>
+      <div class="legend" aria-hidden="true">
+        <span><i class="dot s-decide"></i>等你决定</span><span><i class="dot s-blocked"></i>卡住</span>
+        <span><i class="dot s-doing"></i>在做</span><span><i class="dot s-waiting"></i>等待</span><span><i class="dot s-done"></i>完成</span>
+        <span>大圆的颜色 = 里面最急的事</span>
+        <label class="tog"><input type="checkbox" id="hideDone"> 隐藏已完成</label>
+      </div>
     </div>
+    <div class="side"><div class="card" id="card" aria-live="polite"><div class="empty">Claude 同步数据后，这里显示你点中的那件事。</div></div></div>
   </div>
-
-  <div class="card" id="card" aria-live="polite"><div class="empty">Claude 同步数据后，这里显示你点中的那件事。</div></div>
-  <label class="tog"><input type="checkbox" id="hideDone"> 隐藏已完成的</label>
 
   <div class="cols">
     <section class="panel" aria-labelledby="h-dec"><h2 id="h-dec">等你决定</h2><div id="decisions" class="empty">读取中。</div></section>
@@ -101,14 +139,15 @@ label.tog { font-size: .8rem; color: var(--muted); display: inline-flex; gap: 5p
 <script>
 const ST = { done: "完成", doing: "在做", waiting: "等待", blocked: "卡住", decide: "等你决定" };
 const RANK = { decide: 5, blocked: 4, doing: 3, waiting: 2, done: 1 };
-const TYPE = { workstream: "工作线", project: "项目", decision: "决定", deliverable: "交付物", job: "作业" };
+const TYPE = { workstream: "工作线", project: "项目", decision: "决定", deliverable: "交付物", job: "作业", task: "任务" };
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let nodes = {}, meta = null, db = null, hideDone = false;
-let root = null, focus = null, selected = null, view = null;
+let root = null, focus = null, selected = null, view = null, firstDraw = true;
 try { hideDone = localStorage.getItem("ttHideDone") === "1"; } catch (e) {}
 document.getElementById("hideDone").checked = hideDone;
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+const C = s => css("--" + s);
 
 // ----- tree rules (same as tasktree/model.py) -----
 function kidsOf(id) { return Object.values(nodes).filter(n => (n.parent || null) === id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
@@ -122,12 +161,13 @@ function rollup(n, seen = new Set()) {
   if (n.status && n.status !== "done" && RANK[n.status] > RANK[best]) best = n.status;
   return best;
 }
-function leaves(n) { const ks = kidsOf(n.id); if (!ks.length) return [n.status === "done" ? 1 : 0, 1]; return ks.reduce((a, k) => { const [d, t] = leaves(k); return [a[0] + d, a[1] + t]; }, [0, 0]); }
+function leafStats(n) { const ks = kidsOf(n.id); if (!ks.length) return { [n.status || "waiting"]: 1 }; const out = {}; ks.forEach(k => { const s = leafStats(k); for (const x in s) out[x] = (out[x] || 0) + s[x]; }); return out; }
 function short(t, max) { return t.length > max ? t.slice(0, Math.max(1, max - 1)) + "…" : t; }
 
 // ----- circle packing -----
 const svg = d3.select("#pack");
 let W = 600;
+function st(d) { return d.data.id === "__root" ? "doing" : rollup(d.data.node); }
 function build() {
   const visible = id => !hideDone || rollup(nodes[id]) !== "done";
   const mk = id => {
@@ -136,98 +176,129 @@ function build() {
     return { id, node: n, children: ks.length ? ks.map(k => mk(k.id)) : undefined };
   };
   const h = d3.hierarchy(mk("__root"))
-    .sum(d => d.children ? 0 : (d.node.status === "done" ? 0.45 : d.node.type === "decision" ? 1.3 : 1))
+    .sum(d => d.children ? 0 : (d.node.status === "done" ? 0.4 : d.node.type === "decision" ? 1.4 : 1))
     .sort((a, b) => (RANK[st(b)] - RANK[st(a)]) || (b.value - a.value));
-  W = Math.min(document.querySelector(".stage").clientWidth || 600, 820);
-  root = d3.pack().size([W, W]).padding(d => d.depth === 0 ? 8 : 4)(h);
+  W = Math.min(document.querySelector(".stage").clientWidth || 600, 900);
+  root = d3.pack().size([W, W]).padding(d => d.depth === 0 ? 14 : 6)(h);
 }
-function st(d) { return d.data.id === "__root" ? "doing" : rollup(d.data.node); }
 
 function draw() {
-  const C = { done: css("--done"), doing: css("--doing"), waiting: css("--wait"), blocked: css("--blocked"), decide: css("--decide") };
-  const fills = [css("--l0"), css("--l1"), css("--l2"), css("--l3")];
   svg.attr("viewBox", `${-W / 2} ${-W / 2} ${W} ${W}`).selectAll("*").remove();
   svg.on("click", () => { if (focus && focus.parent) zoom(focus.parent); });
+  const defs = svg.append("defs");
+  defs.append("filter").attr("id", "lift").attr("x", "-30%").attr("y", "-30%").attr("width", "160%").attr("height", "160%")
+    .append("feDropShadow").attr("dx", 0).attr("dy", 1.5).attr("stdDeviation", 1.8).attr("flood-color", C("shadow")).attr("flood-opacity", 1);
+  ["decide", "blocked", "doing", "waiting", "done"].forEach(s => {
+    const c = d3.color(C(s)), g = defs.append("radialGradient").attr("id", "bead-" + s).attr("cx", "35%").attr("cy", "30%").attr("r", "75%");
+    g.append("stop").attr("offset", "0%").attr("stop-color", c.brighter(0.9));
+    g.append("stop").attr("offset", "100%").attr("stop-color", c.darker(0.15));
+  });
   const all = root.descendants();
+  const tint = (s, a) => { const c = d3.color(C(s)); c.opacity = a; return c + ""; };
   svg.append("g").selectAll("circle").data(all, d => d.data.id).join("circle")
-    .attr("fill", d => d.children ? fills[Math.min(d.depth, 3)] : C[st(d)])
-    .attr("fill-opacity", d => !d.children && st(d) === "done" ? 0.45 : 1)
-    .attr("stroke", d => d.depth === 0 ? "none" : d.children ? C[st(d)] : (selected === d ? css("--fg") : "none"))
-    .attr("stroke-width", d => d.children ? (d.depth === 1 ? 2.5 : 1.8) : 2.5)
-    .attr("stroke-opacity", d => d.children && st(d) === "done" ? 0.4 : 0.9)
+    .attr("class", d => d.depth ? "c node" : "c")
+    .attr("fill", d => d.depth === 0 ? "none" : d.children ? tint(st(d), st(d) === "done" ? 0.05 : 0.09 + 0.02 * Math.min(d.depth, 3)) : `url(#bead-${st(d)})`)
+    .attr("fill-opacity", d => !d.children && st(d) === "done" ? 0.55 : 1)
+    .attr("stroke", d => d.depth === 0 ? "none" : d.children ? tint(st(d), st(d) === "done" ? 0.3 : 0.65) : "none")
+    .attr("stroke-width", d => d.depth === 1 ? 1.6 : 1.1)
+    .attr("filter", d => !d.children && d.depth ? "url(#lift)" : null)
     .attr("pointer-events", d => d.depth === 0 ? "none" : null)
     .on("click", (ev, d) => { ev.stopPropagation(); if (d.children && d !== focus) zoom(d); else select(d); });
-  const label = svg.append("g").selectAll("g").data(all.filter(d => d.depth > 0), d => d.data.id).join("g").attr("class", "lbl");
-  label.append("text").attr("class", "main").attr("text-anchor", "middle");
-  label.append("text").attr("class", "sub").attr("text-anchor", "middle");
-  apply(view || [root.x, root.y, root.r * 2]);
+  svg.append("g").attr("class", "halos").selectAll("circle").data(all.filter(d => !d.children && d.data.node.status === "decide"), d => d.data.id).join("circle").attr("class", "halo");
+  svg.append("circle").attr("class", "sel").attr("fill", "none").attr("stroke", C("fg")).attr("stroke-width", 2).attr("pointer-events", "none");
+  const pills = svg.append("g").selectAll("g").data(all.filter(d => d.depth > 0), d => d.data.id).join("g").attr("class", "pill");
+  pills.append("rect").attr("filter", "url(#lift)");
+  pills.append("text").attr("class", d => "t" + (d.depth === 1 ? " ws" : "")).attr("text-anchor", "middle").attr("dy", "0.35em");
+  pills.append("text").attr("class", "n").attr("text-anchor", "middle").attr("dy", "0.35em");
+  const v = view || [root.x, root.y, root.r * 2];
+  if (firstDraw && !reduceMotion) {
+    firstDraw = false;
+    svg.transition().duration(900).ease(d3.easeCubicOut).tween("grow", () => t => apply(v, t));
+  } else apply(v, 1);
 }
-function visibleLabel(d) { return d.parent === focus || (d === focus && !d.children); }
-function apply(v) {
+function apply(v, grow = 1) {
   view = v; const k = W / v[2];
-  svg.selectAll("circle").attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`).attr("r", d => d.r * k);
-  svg.selectAll("g.lbl").each(function (d) {
-    const r = d.r * k, show = visibleLabel(d) && r > 16, g = d3.select(this);
-    const x = (d.x - v[0]) * k, y = (d.y - v[1]) * k;
-    const fs = Math.max(11, Math.min(17, r / 3.2)), maxChars = Math.max(2, Math.floor((r * 1.8) / fs));
-    const yOff = d.children ? -r + fs + 6 : 0;   // parents: label near the top edge so children stay visible
-    g.select("text.main").attr("x", x).attr("y", y + yOff).attr("dy", d.children ? 0 : "0.35em")
-      .attr("font-size", fs).attr("font-weight", d.children ? 700 : 500)
-      .style("display", show ? null : "none").text(short(d.data.node.title, maxChars));
-    const [dn, t] = leaves(d.data.node);
-    g.select("text.sub").attr("x", x).attr("y", y + yOff + fs * 1.05).attr("font-size", Math.max(10, fs * 0.72))
-      .style("display", show && d.children && r > 40 ? null : "none").text(dn + "/" + t);
+  const pos = d => [(d.x - v[0]) * k, (d.y - v[1]) * k];
+  const g = d => grow >= 1 ? 1 : Math.max(0, Math.min(1, grow * 1.6 - d.depth * 0.25));   // entrance: outer rings first
+  svg.selectAll("circle.c").attr("transform", d => `translate(${pos(d)})`).attr("r", d => d.r * k * g(d));
+  svg.selectAll("circle.halo").attr("transform", d => `translate(${pos(d)})`).attr("r", d => d.r * k * g(d) + 2);
+  const sel = selected && selected.depth && !selected.children ? selected : null;
+  svg.select("circle.sel").attr("transform", sel ? `translate(${pos(sel)})` : null).attr("r", sel ? sel.r * k + 3 : 0).attr("opacity", sel ? 1 : 0);
+  svg.selectAll("g.pill").each(function (d) {
+    const r = d.r * k, show = d.parent === focus && r > 15 && grow > 0.6, gg = d3.select(this);
+    gg.style("display", show ? null : "none"); if (!show) return;
+    const [x, y] = pos(d), ws = d.depth === 1;
+    const fs = Math.max(11.5, Math.min(ws ? 18 : 15, r / 3.4)), maxChars = Math.max(3, Math.floor((r * 1.9) / fs));
+    const t = gg.select("text.t").attr("font-size", fs).attr("font-weight", ws ? 700 : 500).text(short(d.data.node.title, maxChars));
+    let n = "";
+    if (d.children) { const s = leafStats(d.data.node), tot = Object.values(s).reduce((a, b) => a + b, 0); n = (s.done || 0) + "/" + tot; }
+    const nt = gg.select("text.n").attr("font-size", fs * 0.72).text(n);
+    const tw = t.node().getComputedTextLength(), nw = n ? nt.node().getComputedTextLength() + 8 : 0;
+    const w = tw + nw + fs * 1.1, h = fs * 1.75;
+    const cy = d.children ? y - r + h / 2 + Math.min(10, r * 0.08) : y;   // parents: pill near the top rim; leaves: centered
+    gg.select("rect").attr("x", x - w / 2).attr("y", cy - h / 2).attr("width", w).attr("height", h).attr("rx", h / 2);
+    t.attr("x", x - nw / 2).attr("y", cy);
+    nt.attr("x", x + w / 2 - fs * 0.55 - nw / 2 + 4).attr("y", cy).style("display", n ? null : "none");
   });
 }
 function zoom(d) {
   focus = d; selected = d;
-  const target = [d.x, d.y, d.r * 2.08];
+  const target = [d.x, d.y, d.r * 2.1];
   const i = d3.interpolateZoom(view, target);
-  svg.transition().duration(reduceMotion ? 0 : 650).tween("zoom", () => t => apply(i(t)))
-    .on("end", () => apply(target));
-  svg.selectAll("circle").attr("stroke", c => c.depth === 0 ? "none" : c.children ? css(sVar(st(c))) : "none");
+  svg.transition().duration(reduceMotion ? 0 : 700).ease(d3.easeCubicInOut).tween("zoom", () => t => apply(i(t)));
   renderCrumbs(); renderCard();
 }
-function select(d) {
-  selected = d;
-  svg.selectAll("circle").filter(c => !c.children).attr("stroke", c => c === d ? css("--fg") : "none");
-  renderCard();
-}
-function sVar(s) { return { done: "--done", doing: "--doing", waiting: "--wait", blocked: "--blocked", decide: "--decide" }[s]; }
+function select(d) { selected = d; apply(view); renderCard(); }
 function findById(id) { return root && root.descendants().find(d => d.data.id === id); }
 
 // ----- DOM parts -----
+function renderSummary() {
+  const box = document.getElementById("summary"); box.textContent = "";
+  const ls = Object.values(nodes).filter(n => !kidsOf(n.id).length), cnt = s => ls.filter(n => n.status === s).length;
+  [["decide", "件等你决定"], ["blocked", "件卡住"], ["doing", "件在做"], ["waiting", "件等待"]].forEach(([s, label]) => {
+    const n = cnt(s); if (!n && s === "blocked") return;
+    const k = el("span", "k"); k.appendChild(el("i", "dot s-" + s)); k.appendChild(el("b", null, String(n))); k.appendChild(document.createTextNode(label)); box.appendChild(k);
+  });
+}
 function renderCrumbs() {
   const c = document.getElementById("crumbs"); c.textContent = "";
-  if (!focus) return;
-  const path = focus.ancestors().reverse();
-  path.forEach((d, i) => {
+  if (!focus || focus === root) return;
+  focus.ancestors().reverse().forEach((d, i, path) => {
     if (i) c.appendChild(el("span", "sep", "›"));
     const name = d.data.id === "__root" ? "全部" : d.data.node.title;
-    if (i === path.length - 1) c.appendChild(el("b", null, name));
-    else { const b = el("button", null, name); b.type = "button"; b.addEventListener("click", () => zoom(d)); c.appendChild(b); }
+    if (i === path.length - 1) c.appendChild(el("b", null, short(name, 16)));
+    else { const b = el("button", null, short(name, 10)); b.type = "button"; b.addEventListener("click", () => zoom(d)); c.appendChild(b); }
   });
+}
+function progressBar(n) {
+  const s = leafStats(n), tot = Object.values(s).reduce((a, b) => a + b, 0), bar = el("div", "bar");
+  ["done", "doing", "decide", "blocked", "waiting"].forEach(k => { if (s[k]) { const i = el("i"); i.style.width = (100 * s[k] / tot) + "%"; i.style.background = `var(--${k})`; bar.appendChild(i); } });
+  return bar;
 }
 function renderCard() {
   const card = document.getElementById("card"); card.textContent = "";
   const d = selected || focus;
   if (!d || d.data.id === "__root") {
-    const open = Object.values(nodes).filter(n => !kidsOf(n.id).length && n.status !== "done").length;
-    card.appendChild(el("div", "ttl", "全部"));
-    card.appendChild(el("div", "next", Object.keys(nodes).length ? `一共 ${Object.keys(nodes).length} 项，${open} 件没做完。点一个大圆进入那条工作线。` : "还没有数据。在任何一个 Claude session 里说“同步记事本”。"));
+    card.style.setProperty("--st", "var(--accent)");
+    card.appendChild(el("div", "eyebrow", "全部工作线"));
+    card.appendChild(el("div", "ttl", Object.keys(nodes).length ? "点一个圆，进入那条工作线" : "还没有数据"));
+    if (!Object.keys(nodes).length) card.appendChild(el("div", "empty", "在任何一个 Claude session 里说“同步记事本”。"));
     if (root && root.children) card.appendChild(kidList(root));
     return;
   }
   const n = d.data.node, s = st(d);
-  const row = el("div", "row"); row.appendChild(el("i", "dot s-" + s)); row.appendChild(el("span", "ttl", n.title)); card.appendChild(row);
+  card.style.setProperty("--st", `var(--${s})`);
+  const path = d.ancestors().reverse().slice(1, -1).map(a => a.data.node.title);
+  card.appendChild(el("div", "eyebrow", path.length ? path.join(" › ") : (TYPE[n.type] || "")));
+  card.appendChild(el("div", "ttl", n.title));
   const m = el("div", "row");
   m.appendChild(el("span", "chip st", ST[s]));
-  if (TYPE[n.type]) m.appendChild(el("span", "chip", TYPE[n.type]));
+  if (TYPE[n.type] && n.type !== "task") m.appendChild(el("span", "chip", TYPE[n.type]));
   if (n.owner) m.appendChild(el("span", "chip", n.owner));
   if (n.date) m.appendChild(el("span", "chip", n.date + (n.updated && n.updated !== n.date ? " → " + n.updated : "")));
-  if (kidsOf(n.id).length) { const [a, t] = leaves(n); m.appendChild(el("span", "chip", "完成 " + a + "/" + t)); }
   card.appendChild(m);
-  if (n.next && s !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "下一步 ")); p.appendChild(document.createTextNode(n.next)); card.appendChild(p); }
+  if (kidsOf(n.id).length) card.appendChild(progressBar(n));
+  if (n.next && s !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "下一步")); p.appendChild(document.createTextNode(n.next)); card.appendChild(p); }
   const bl = (n.blocked_by || []).filter(id => nodes[id] && rollup(nodes[id]) !== "done");
   if (bl.length) card.appendChild(el("div", "blk", "等 " + bl.map(id => nodes[id].title).join("、")));
   if (Array.isArray(n.links) && n.links.length) {
@@ -243,8 +314,7 @@ function kidList(d) {
   d.children.forEach(c => {
     const b = el("button", "kid"); b.type = "button";
     b.appendChild(el("i", "dot s-" + st(c))); b.appendChild(el("span", "t", c.data.node.title));
-    if (c.children) { const [a, t] = leaves(c.data.node); b.appendChild(el("span", "c", a + "/" + t + " ›")); }
-    else if (c.data.node.next && st(c) !== "done") b.appendChild(el("span", "c", short(c.data.node.next, 14)));
+    if (c.children) { const s = leafStats(c.data.node), tot = Object.values(s).reduce((a, x) => a + x, 0); b.appendChild(el("span", "c", (s.done || 0) + "/" + tot + " ›")); }
     b.addEventListener("click", () => c.children ? zoom(c) : (focus === d ? select(c) : (zoom(d), select(c))));
     box.appendChild(b);
   });
@@ -270,11 +340,11 @@ function renderDecisions() {
   const ds = Object.values(nodes).filter(n => n.type === "decision" && n.status === "decide");
   if (!ds.length) { box.className = "empty"; box.textContent = "现在没有等你决定的事。"; return; }
   ds.forEach(n => {
-    const c = el("div", "dcard"); const q = el("div", "q", n.title); q.title = "在圆里找到它";
+    const c = el("div", "dcard"); const q = el("div", "q"); q.appendChild(el("i", "dot s-decide")); q.appendChild(document.createTextNode(n.title)); q.title = "在图上找到它";
     q.addEventListener("click", () => { const d = findById(n.id); if (d) { zoom(d.parent); select(d); document.querySelector(".stage").scrollIntoView({ block: "nearest" }); } });
     c.appendChild(q);
     const path = []; let p = n.parent && nodes[n.parent]; while (p) { path.unshift(p.title); p = p.parent && nodes[p.parent]; }
-    if (path.length) c.appendChild(el("div", "next", path.join(" › ")));
+    if (path.length) c.appendChild(el("div", "path", path.join(" › ")));
     c.appendChild(optionRow(n)); box.appendChild(c);
   });
 }
@@ -282,20 +352,21 @@ function renderLog() {
   const ol = document.getElementById("log"); ol.textContent = "";
   const rows = (meta && Array.isArray(meta.recent)) ? meta.recent : [];
   if (!rows.length) { ol.appendChild(el("li", "empty", "还没有动态。")); return; }
-  rows.slice(0, 20).forEach(r => { const li = el("li"); li.appendChild(el("time", null, r.ts || "")); li.appendChild(el("span", null, r.text || "")); ol.appendChild(li); });
+  rows.slice(0, 16).forEach(r => { const li = el("li"); li.appendChild(el("time", null, r.ts || "")); li.appendChild(el("span", null, r.text || "")); ol.appendChild(li); });
 }
 function renderAll() {
   const keepFocus = focus && focus.data.id, keepSel = selected && selected.data.id;
   build();
   focus = (keepFocus && findById(keepFocus)) || root;
   selected = (keepSel && findById(keepSel)) || focus;
-  view = [focus.x, focus.y, focus.r * 2.08];
-  draw(); renderCrumbs(); renderCard(); renderDecisions(); renderLog();
+  view = [focus.x, focus.y, focus.r * (focus === root ? 2 : 2.1)];
+  draw(); renderSummary(); renderCrumbs(); renderCard(); renderDecisions(); renderLog();
   document.getElementById("stamp").textContent = meta && meta.snapshot ? "最近同步 " + meta.snapshot : "还没有同步过";
 }
 document.getElementById("hideDone").addEventListener("change", e => { hideDone = e.target.checked; try { localStorage.setItem("ttHideDone", hideDone ? "1" : "0"); } catch (x) {} renderAll(); });
 let rt = null; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => renderAll());
+new MutationObserver(() => renderAll()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 renderAll();
 try { const h = decodeURIComponent((location.hash || "").slice(1)); if (h) { const d = findById(h); if (d) zoom(d.children ? d : d.parent); } } catch (e) {}
 
