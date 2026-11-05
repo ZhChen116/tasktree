@@ -1,26 +1,27 @@
 <title>动态记事本</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <style>
-/* Layout: a rotatable globe of the current level's nodes (drag to spin, tap to go in),
-   a card for the node facing you, then pending decisions and recent activity. */
+/* Layout: nested circles (circle packing) of the whole tree; tap a circle to zoom into it,
+   tap outside to zoom out. Below: the selected node's card, then decisions and recent activity. */
 :root {
   --bg: #f2f4f7; --panel: #ffffff; --fg: #1a2029; --muted: #5c6773; --rule: #d9e0e7;
-  --accent: #2f5f8f; --done: #2f7d5b; --doing: #c98a1b; --wait: #7b8590; --blocked: #b8483a; --decide: #7a4fb0;
-  --chip-bg: #ecf0f4; --core: #dfe6ee; --ring: #c5d0db;
+  --accent: #2f5f8f; --done: #2f7d5b; --doing: #c98a1b; --wait: #8a939d; --blocked: #b8483a; --decide: #7a4fb0;
+  --chip-bg: #ecf0f4; --l0: #e6ebf1; --l1: #f6f8fa; --l2: #eef2f6; --l3: #f8fafb;
   --sans: "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #10141a; --panel: #19202a; --fg: #e4e9ef; --muted: #97a2ae; --rule: #29323d;
-  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #8a95a1; --blocked: #e0796b; --decide: #b693e6;
-  --chip-bg: #222a34; --core: #1d2631; --ring: #2c3744; color-scheme: dark } }
+  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #7f8a96; --blocked: #e0796b; --decide: #b693e6;
+  --chip-bg: #222a34; --l0: #141a22; --l1: #1d252f; --l2: #232c37; --l3: #2a3440; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #10141a; --panel: #19202a; --fg: #e4e9ef; --muted: #97a2ae; --rule: #29323d;
-  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #8a95a1; --blocked: #e0796b; --decide: #b693e6;
-  --chip-bg: #222a34; --core: #1d2631; --ring: #2c3744; color-scheme: dark }
+  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #7f8a96; --blocked: #e0796b; --decide: #b693e6;
+  --chip-bg: #222a34; --l0: #141a22; --l1: #1d252f; --l2: #232c37; --l3: #2a3440; color-scheme: dark }
 body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
-.wrap { max-width: 860px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 40px; display: grid; gap: 14px; }
+.wrap { max-width: 820px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 40px; display: grid; gap: 12px; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 h1 { font-size: 1.3rem; margin: 0; display: flex; align-items: center; gap: 10px; }
 h2 { font-size: 1rem; margin: 0 0 8px; }
@@ -29,29 +30,31 @@ h2 { font-size: 1rem; margin: 0 0 8px; }
 .crumbs button { font: inherit; border: 1px solid var(--rule); background: var(--panel); color: var(--accent); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
 .crumbs b { font-weight: 500; padding: 2px 4px; }
 .sep { color: var(--muted); }
-.stage { position: relative; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
-canvas { display: block; width: 100%; cursor: grab; }
-canvas.dragging { cursor: grabbing; }
-.hint { position: absolute; left: 12px; bottom: 8px; font-size: .74rem; color: var(--muted); pointer-events: none; }
-.legend { position: absolute; right: 12px; top: 10px; display: grid; gap: 2px; font-size: .72rem; color: var(--muted); pointer-events: none; }
-.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+.stage { position: relative; background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; }
+svg#pack { display: block; width: 100%; height: auto; cursor: zoom-out; }
+svg#pack circle { cursor: pointer; }
+svg#pack text { font-family: var(--sans); pointer-events: none; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; fill: var(--fg); }
+svg#pack text.sub { font-family: var(--mono); fill: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: .74rem; color: var(--muted); padding: 6px 12px 8px; border-top: 1px solid var(--rule); }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+.ring { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; border: 2px solid var(--doing); box-sizing: border-box; }
 .s-done { background: var(--done); } .s-doing { background: var(--doing); } .s-waiting { background: var(--wait); }
 .s-blocked { background: var(--blocked); } .s-decide { background: var(--decide); }
 .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; display: grid; gap: 6px; min-width: 0; }
-.card .row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.card .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .card .ttl { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+.card a { color: var(--accent); font-size: .86rem; }
 .chip { font-size: .74rem; padding: 1px 8px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); white-space: nowrap; }
 .chip.st { color: var(--fg); }
 .next { font-size: .88rem; color: var(--muted); overflow-wrap: anywhere; }
 .next b { color: var(--fg); font-weight: 500; }
 .blk { font-size: .82rem; color: var(--blocked); }
-.kids { display: flex; flex-wrap: wrap; gap: 6px; }
-.kid { font: inherit; font-size: .8rem; display: inline-flex; align-items: center; border: 1px solid var(--rule); background: var(--chip-bg); color: var(--fg); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-button.btn { font: inherit; font-size: .85rem; border: 1px solid var(--accent); background: var(--accent); color: var(--panel); border-radius: 8px; padding: 4px 14px; cursor: pointer; }
-button.btn.ghost { background: transparent; color: var(--accent); }
+.kids { display: grid; gap: 4px; }
+.kid { font: inherit; font-size: .86rem; display: flex; align-items: center; gap: 6px; text-align: left; border: 0; border-top: 1px solid var(--rule); background: none; color: var(--fg); padding: 6px 2px; cursor: pointer; min-width: 0; }
+.kid span.t { flex: 1; overflow-wrap: anywhere; }
+.kid span.c { font-family: var(--mono); font-size: .74rem; color: var(--muted); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.cols { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.cols { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; min-width: 0; }
 .dcard { border-left: 3px solid var(--decide); padding: 4px 0 4px 10px; display: grid; gap: 5px; margin-bottom: 10px; }
 .dcard .q { font-weight: 500; cursor: pointer; }
@@ -77,17 +80,17 @@ label.tog { font-size: .8rem; color: var(--muted); display: inline-flex; gap: 5p
 
   <div class="crumbs" id="crumbs" aria-label="位置"></div>
 
-  <div class="stage" id="stage">
-    <canvas id="globe" aria-label="当前这一层的事情分布在球面上：拖动旋转，点一下进入"></canvas>
+  <div class="stage">
+    <svg id="pack" role="img" aria-label="所有事情的嵌套圆：大圆是工作线，里面的小圆是项目和任务。点一个圆放大进去，点空白处退出一层。"></svg>
     <div class="legend" aria-hidden="true">
       <span><i class="dot s-decide"></i>等你决定</span><span><i class="dot s-blocked"></i>卡住</span>
       <span><i class="dot s-doing"></i>在做</span><span><i class="dot s-waiting"></i>等待</span><span><i class="dot s-done"></i>完成</span>
+      <span><i class="ring"></i>圈的边框 = 里面最急的状态</span><span>点圆放大 · 点空白退出</span>
     </div>
-    <div class="hint" id="hint">拖动旋转 · 点一下进入 · 点中心返回上一层</div>
   </div>
 
-  <div class="card" id="card" aria-live="polite"><div class="empty">Claude 同步数据后，转到正面的那件事会显示在这里。</div></div>
-  <label class="tog"><input type="checkbox" id="showDone"> 球上也显示已完成的</label>
+  <div class="card" id="card" aria-live="polite"><div class="empty">Claude 同步数据后，这里显示你点中的那件事。</div></div>
+  <label class="tog"><input type="checkbox" id="hideDone"> 隐藏已完成的</label>
 
   <div class="cols">
     <section class="panel" aria-labelledby="h-dec"><h2 id="h-dec">等你决定</h2><div id="decisions" class="empty">读取中。</div></section>
@@ -98,19 +101,20 @@ label.tog { font-size: .8rem; color: var(--muted); display: inline-flex; gap: 5p
 <script>
 const ST = { done: "完成", doing: "在做", waiting: "等待", blocked: "卡住", decide: "等你决定" };
 const RANK = { decide: 5, blocked: 4, doing: 3, waiting: 2, done: 1 };
-const TYPE = { workstream: "工作线", project: "项目", decision: "决定", deliverable: "交付物", job: "作业", task: "任务" };
-let nodes = {}, meta = null, db = null, focusId = null, showDone = false;
+const TYPE = { workstream: "工作线", project: "项目", decision: "决定", deliverable: "交付物", job: "作业" };
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-try { showDone = localStorage.getItem("ttShowDone") === "1"; } catch (e) {}
-document.getElementById("showDone").checked = showDone;
+let nodes = {}, meta = null, db = null, hideDone = false;
+let root = null, focus = null, selected = null, view = null;
+try { hideDone = localStorage.getItem("ttHideDone") === "1"; } catch (e) {}
+document.getElementById("hideDone").checked = hideDone;
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 // ----- tree rules (same as tasktree/model.py) -----
-function kids(id) { return Object.values(nodes).filter(n => (n.parent || null) === id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
+function kidsOf(id) { return Object.values(nodes).filter(n => (n.parent || null) === id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
 function rollup(n, seen = new Set()) {
   if (seen.has(n.id)) return n.status || "waiting"; seen.add(n.id);
-  const ks = kids(n.id);
+  const ks = kidsOf(n.id);
   if (!ks.length) return n.status || "waiting";
   const sts = ks.map(k => rollup(k, seen));
   if (sts.every(s => s === "done")) return ["doing", "blocked", "decide"].includes(n.status) ? n.status : "done";
@@ -118,171 +122,133 @@ function rollup(n, seen = new Set()) {
   if (n.status && n.status !== "done" && RANK[n.status] > RANK[best]) best = n.status;
   return best;
 }
-function leaves(n) { const ks = kids(n.id); if (!ks.length) return [n.status === "done" ? 1 : 0, 1]; return ks.reduce((a, k) => { const [d, t] = leaves(k); return [a[0] + d, a[1] + t]; }, [0, 0]); }
-function urgentCount(n) { const ks = kids(n.id); if (!ks.length) return (n.status === "decide" || n.status === "blocked") ? 1 : 0; return ks.reduce((s, k) => s + urgentCount(k), 0); }
-function pathTo(id) { const p = []; let c = id && nodes[id]; while (c) { p.unshift(c); c = c.parent && nodes[c.parent]; } return p; }
+function leaves(n) { const ks = kidsOf(n.id); if (!ks.length) return [n.status === "done" ? 1 : 0, 1]; return ks.reduce((a, k) => { const [d, t] = leaves(k); return [a[0] + d, a[1] + t]; }, [0, 0]); }
+function short(t, max) { return t.length > max ? t.slice(0, Math.max(1, max - 1)) + "…" : t; }
 
-// ----- globe state -----
-const cv = document.getElementById("globe"), ctx = cv.getContext("2d"), stage = document.getElementById("stage");
-let W = 0, H = 0, DPR = 1, R = 0;
-let rot = [1, 0, 0, 0, 1, 0, 0, 0, 1];             // rotation matrix, row-major
-let pts = [];                                       // {node, base:[x,y,z]}
-let vx = 0, vy = 0, lastInteract = 0, enterT = 1, frontId = null;
-let drag = null;
-
-function mul(a, b) { const r = new Array(9); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j]; return r; }
-function rotY(t) { const c = Math.cos(t), s = Math.sin(t); return [c, 0, s, 0, 1, 0, -s, 0, c]; }
-function rotX(t) { const c = Math.cos(t), s = Math.sin(t); return [1, 0, 0, 0, c, -s, 0, s, c]; }
-function apply(m, v) { return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]]; }
-
-function layout() {
-  let ks = kids(focusId);
-  if (!showDone) { const open = ks.filter(k => rollup(k) !== "done"); if (open.length) ks = open; }
-  const n = ks.length, g = Math.PI * (3 - Math.sqrt(5));
-  pts = ks.map((node, i) => {
-    if (n === 1) return { node, base: [0, 0, 1] };
-    const y = 1 - 2 * (i + 0.5) / n, r = Math.sqrt(1 - y * y), th = i * g;
-    return { node, base: [r * Math.sin(th), y * 0.92, r * Math.cos(th)] };
-  });
-  rot = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-  enterT = reduceMotion ? 1 : 0;
+// ----- circle packing -----
+const svg = d3.select("#pack");
+let W = 600;
+function build() {
+  const visible = id => !hideDone || rollup(nodes[id]) !== "done";
+  const mk = id => {
+    const ks = kidsOf(id === "__root" ? null : id).filter(k => visible(k.id));
+    const n = id === "__root" ? { id: "__root", title: "全部" } : nodes[id];
+    return { id, node: n, children: ks.length ? ks.map(k => mk(k.id)) : undefined };
+  };
+  const h = d3.hierarchy(mk("__root"))
+    .sum(d => d.children ? 0 : (d.node.status === "done" ? 0.45 : d.node.type === "decision" ? 1.3 : 1))
+    .sort((a, b) => (RANK[st(b)] - RANK[st(a)]) || (b.value - a.value));
+  W = Math.min(document.querySelector(".stage").clientWidth || 600, 820);
+  root = d3.pack().size([W, W]).padding(d => d.depth === 0 ? 8 : 4)(h);
 }
-function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = stage.clientWidth; H = Math.round(Math.min(Math.max(W * 0.86, 300), 560));
-  cv.width = W * DPR; cv.height = H * DPR; cv.style.height = H + "px";
-  R = Math.min(W, H) * 0.36;
-}
-function project(v) { const d = 3.2, s = d / (d - v[2]); return { x: W / 2 + v[0] * R * s, y: H / 2 - v[1] * R * s, s, z: v[2] }; }
-function bubbleR(node, s) { const [, t] = leaves(node); return Math.max(14, Math.min(40, 12 + 7 * Math.sqrt(t))) * s * (W < 480 ? 0.85 : 1); }
-function shorten(t, max) { return t.length > max ? t.slice(0, max - 1) + "…" : t; }
+function st(d) { return d.data.id === "__root" ? "doing" : rollup(d.data.node); }
 
 function draw() {
   const C = { done: css("--done"), doing: css("--doing"), waiting: css("--wait"), blocked: css("--blocked"), decide: css("--decide") };
-  const fg = css("--fg"), muted = css("--muted"), panel = css("--panel"), core = css("--core"), ring = css("--ring");
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.clearRect(0, 0, W, H);
-  const k = 0.55 + 0.45 * easeOut(enterT);
-  // the globe itself
-  ctx.beginPath(); ctx.arc(W / 2, H / 2, R * 1.04 * k, 0, Math.PI * 2);
-  ctx.strokeStyle = ring; ctx.lineWidth = 1; ctx.setLineDash([3, 5]); ctx.stroke(); ctx.setLineDash([]);
-  // center core = where you are
-  const here = focusId ? nodes[focusId] : null;
-  const coreR = Math.max(26, R * 0.22) * k;
-  ctx.beginPath(); ctx.arc(W / 2, H / 2, coreR, 0, Math.PI * 2); ctx.fillStyle = core; ctx.fill();
-  ctx.fillStyle = muted; ctx.font = `500 ${Math.round(12 * (W < 480 ? 0.95 : 1))}px ${css("--sans")}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(shorten(here ? here.title : "全部", 7), W / 2, H / 2 - (focusId ? 7 : 0));
-  if (focusId) { ctx.font = `400 11px ${css("--sans")}`; ctx.fillText("↩ 返回", W / 2, H / 2 + 10); }
-
-  const proj = pts.map(p => { const v = apply(rot, p.base); const q = project([v[0] * k, v[1] * k, v[2] * k]); return { p, q, v }; });
-  proj.sort((a, b) => a.q.z - b.q.z);
-  let best = null;
-  for (const { p, q, v } of proj) {
-    const st = rollup(p.node), r = bubbleR(p.node, q.s);
-    const depth = (v[2] + 1) / 2, alpha = (0.28 + 0.72 * depth) * easeOut(enterT);
-    // spoke to the core
-    ctx.globalAlpha = alpha * 0.35; ctx.strokeStyle = ring; ctx.beginPath(); ctx.moveTo(W / 2, H / 2); ctx.lineTo(q.x, q.y); ctx.stroke();
-    ctx.globalAlpha = alpha;
-    ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = C[st]; ctx.fill();
-    ctx.lineWidth = p.node.id === frontId ? 3 : 1.5; ctx.strokeStyle = p.node.id === frontId ? fg : panel; ctx.stroke();
-    // leaf count inside, small ring for children
-    const [d, t] = leaves(p.node);
-    if (kids(p.node.id).length) {
-      ctx.fillStyle = panel; ctx.font = `600 ${Math.max(10, Math.round(r * 0.5))}px ${css("--mono")}`; ctx.fillText(d + "/" + t, q.x, q.y);
-    }
-    const u = urgentCount(p.node);
-    if (u && st !== "done") { ctx.beginPath(); ctx.arc(q.x + r * 0.75, q.y - r * 0.75, 8, 0, Math.PI * 2); ctx.fillStyle = C.decide; ctx.fill(); ctx.fillStyle = panel; ctx.font = `700 10px ${css("--mono")}`; ctx.fillText(String(u), q.x + r * 0.75, q.y - r * 0.75 + 0.5); }
-    // label
-    if (v[2] > -0.35) {
-      ctx.fillStyle = fg; ctx.font = `${v[2] > 0.6 ? 700 : 500} ${Math.round(12.5 * Math.min(1.15, q.s))}px ${css("--sans")}`;
-      ctx.fillText(shorten(p.node.title, W < 480 ? 9 : 14), q.x, q.y + r + 12);
-    }
-    ctx.globalAlpha = 1;
-    p.screen = { x: q.x, y: q.y, r, z: v[2] };
-    if (!best || v[2] > best.z) best = { id: p.node.id, z: v[2] };
-  }
-  const newFront = best ? best.id : null;
-  if (newFront !== frontId) { frontId = newFront; renderCard(); }
+  const fills = [css("--l0"), css("--l1"), css("--l2"), css("--l3")];
+  svg.attr("viewBox", `${-W / 2} ${-W / 2} ${W} ${W}`).selectAll("*").remove();
+  svg.on("click", () => { if (focus && focus.parent) zoom(focus.parent); });
+  const all = root.descendants();
+  svg.append("g").selectAll("circle").data(all, d => d.data.id).join("circle")
+    .attr("fill", d => d.children ? fills[Math.min(d.depth, 3)] : C[st(d)])
+    .attr("fill-opacity", d => !d.children && st(d) === "done" ? 0.45 : 1)
+    .attr("stroke", d => d.depth === 0 ? "none" : d.children ? C[st(d)] : (selected === d ? css("--fg") : "none"))
+    .attr("stroke-width", d => d.children ? (d.depth === 1 ? 2.5 : 1.8) : 2.5)
+    .attr("stroke-opacity", d => d.children && st(d) === "done" ? 0.4 : 0.9)
+    .attr("pointer-events", d => d.depth === 0 ? "none" : null)
+    .on("click", (ev, d) => { ev.stopPropagation(); if (d.children && d !== focus) zoom(d); else select(d); });
+  const label = svg.append("g").selectAll("g").data(all.filter(d => d.depth > 0), d => d.data.id).join("g").attr("class", "lbl");
+  label.append("text").attr("class", "main").attr("text-anchor", "middle");
+  label.append("text").attr("class", "sub").attr("text-anchor", "middle");
+  apply(view || [root.x, root.y, root.r * 2]);
 }
-function easeOut(t) { return 1 - Math.pow(1 - Math.min(1, t), 3); }
-
-function tick(now) {
-  if (!drag) {
-    if (Math.abs(vx) > 1e-5 || Math.abs(vy) > 1e-5) { rot = mul(rotX(vy), mul(rotY(vx), rot)); vx *= 0.94; vy *= 0.94; }
-    else if (!reduceMotion && now - lastInteract > 4000 && pts.length > 1) rot = mul(rotY(0.0025), rot);
-  }
-  if (enterT < 1) enterT += 0.06;
-  draw();
-  requestAnimationFrame(tick);
+function visibleLabel(d) { return d.parent === focus || (d === focus && !d.children); }
+function apply(v) {
+  view = v; const k = W / v[2];
+  svg.selectAll("circle").attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`).attr("r", d => d.r * k);
+  svg.selectAll("g.lbl").each(function (d) {
+    const r = d.r * k, show = visibleLabel(d) && r > 16, g = d3.select(this);
+    const x = (d.x - v[0]) * k, y = (d.y - v[1]) * k;
+    const fs = Math.max(11, Math.min(17, r / 3.2)), maxChars = Math.max(2, Math.floor((r * 1.8) / fs));
+    const yOff = d.children ? -r + fs + 6 : 0;   // parents: label near the top edge so children stay visible
+    g.select("text.main").attr("x", x).attr("y", y + yOff).attr("dy", d.children ? 0 : "0.35em")
+      .attr("font-size", fs).attr("font-weight", d.children ? 700 : 500)
+      .style("display", show ? null : "none").text(short(d.data.node.title, maxChars));
+    const [dn, t] = leaves(d.data.node);
+    g.select("text.sub").attr("x", x).attr("y", y + yOff + fs * 1.05).attr("font-size", Math.max(10, fs * 0.72))
+      .style("display", show && d.children && r > 40 ? null : "none").text(dn + "/" + t);
+  });
 }
-
-// ----- input: drag to spin, tap to enter -----
-cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: 0 }; vx = vy = 0; lastInteract = performance.now(); cv.classList.add("dragging"); });
-cv.addEventListener("pointermove", e => {
-  if (!drag) return;
-  const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
-  drag.moved += Math.abs(dx) + Math.abs(dy);
-  const ax = dx / (R * 1.2), ay = dy / (R * 1.2);
-  rot = mul(rotX(ay), mul(rotY(ax), rot)); vx = ax; vy = ay; lastInteract = performance.now();
-});
-function endDrag(e) {
-  if (!drag) return;
-  const tap = drag.moved < 8; cv.classList.remove("dragging"); drag = null; lastInteract = performance.now();
-  if (!tap) return;
-  vx = vy = 0;
-  const b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
-  const hit = pts.filter(p => p.screen && Math.hypot(p.screen.x - x, p.screen.y - y) <= p.screen.r + 6).sort((a, c) => c.screen.z - a.screen.z)[0];
-  if (hit) { open(hit.node.id); return; }
-  if (focusId && Math.hypot(x - W / 2, y - H / 2) < Math.max(26, R * 0.22)) go(nodes[focusId].parent || null);
+function zoom(d) {
+  focus = d; selected = d;
+  const target = [d.x, d.y, d.r * 2.08];
+  const i = d3.interpolateZoom(view, target);
+  svg.transition().duration(reduceMotion ? 0 : 650).tween("zoom", () => t => apply(i(t)))
+    .on("end", () => apply(target));
+  svg.selectAll("circle").attr("stroke", c => c.depth === 0 ? "none" : c.children ? css(sVar(st(c))) : "none");
+  renderCrumbs(); renderCard();
 }
-cv.addEventListener("pointerup", endDrag);
-cv.addEventListener("pointercancel", () => { drag = null; cv.classList.remove("dragging"); });
-
-function open(id) { if (kids(id).length) go(id); else { frontId = id; renderCard(true); bringToFront(id); } }
-function go(id) { focusId = id || null; frontId = null; layout(); renderCrumbs(); renderCard(); }
-function bringToFront(id) {
-  const p = pts.find(p => p.node.id === id); if (!p) return;
-  const v = apply(rot, p.base), yaw = Math.atan2(v[0], v[2]); let m = mul(rotY(-yaw), rot);
-  const v2 = apply(m, p.base), pitch = Math.atan2(v2[1], v2[2]); rot = mul(rotX(pitch), m); vx = vy = 0; lastInteract = performance.now();
+function select(d) {
+  selected = d;
+  svg.selectAll("circle").filter(c => !c.children).attr("stroke", c => c === d ? css("--fg") : "none");
+  renderCard();
 }
+function sVar(s) { return { done: "--done", doing: "--doing", waiting: "--wait", blocked: "--blocked", decide: "--decide" }[s]; }
+function findById(id) { return root && root.descendants().find(d => d.data.id === id); }
 
 // ----- DOM parts -----
 function renderCrumbs() {
   const c = document.getElementById("crumbs"); c.textContent = "";
-  const top = el("button", null, "全部"); top.type = "button"; top.addEventListener("click", () => go(null));
-  if (!focusId) { c.appendChild(el("b", null, "全部")); return; }
-  c.appendChild(top);
-  pathTo(focusId).forEach((n, i, arr) => {
-    c.appendChild(el("span", "sep", "›"));
-    if (i === arr.length - 1) c.appendChild(el("b", null, n.title));
-    else { const b = el("button", null, n.title); b.type = "button"; b.addEventListener("click", () => go(n.id)); c.appendChild(b); }
+  if (!focus) return;
+  const path = focus.ancestors().reverse();
+  path.forEach((d, i) => {
+    if (i) c.appendChild(el("span", "sep", "›"));
+    const name = d.data.id === "__root" ? "全部" : d.data.node.title;
+    if (i === path.length - 1) c.appendChild(el("b", null, name));
+    else { const b = el("button", null, name); b.type = "button"; b.addEventListener("click", () => zoom(d)); c.appendChild(b); }
   });
 }
-function renderCard(pinned) {
+function renderCard() {
   const card = document.getElementById("card"); card.textContent = "";
-  const n = frontId && nodes[frontId];
-  if (!n) { card.appendChild(el("div", "empty", pts.length ? "转动球，正面那件事会显示在这里。" : Object.keys(nodes).length ? "这一层是空的。" : "还没有数据。在任何一个 Claude session 里说“同步记事本”。")); return; }
-  const st = rollup(n), row = el("div", "row");
-  const d = el("i", "dot s-" + st); row.appendChild(d); row.appendChild(el("span", "ttl", n.title));
-  card.appendChild(row);
-  const meta = el("div", "row");
-  meta.appendChild(el("span", "chip st", ST[st]));
-  if (TYPE[n.type] && n.type !== "task") meta.appendChild(el("span", "chip", TYPE[n.type]));
-  if (n.owner) meta.appendChild(el("span", "chip", n.owner));
-  if (n.date) meta.appendChild(el("span", "chip", n.date + (n.updated && n.updated !== n.date ? " → " + n.updated : "")));
-  const ks = kids(n.id); if (ks.length) { const [a, t] = leaves(n); meta.appendChild(el("span", "chip", "完成 " + a + "/" + t)); }
-  card.appendChild(meta);
-  if (n.next && st !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "下一步 ")); p.appendChild(document.createTextNode(n.next)); card.appendChild(p); }
+  const d = selected || focus;
+  if (!d || d.data.id === "__root") {
+    const open = Object.values(nodes).filter(n => !kidsOf(n.id).length && n.status !== "done").length;
+    card.appendChild(el("div", "ttl", "全部"));
+    card.appendChild(el("div", "next", Object.keys(nodes).length ? `一共 ${Object.keys(nodes).length} 项，${open} 件没做完。点一个大圆进入那条工作线。` : "还没有数据。在任何一个 Claude session 里说“同步记事本”。"));
+    if (root && root.children) card.appendChild(kidList(root));
+    return;
+  }
+  const n = d.data.node, s = st(d);
+  const row = el("div", "row"); row.appendChild(el("i", "dot s-" + s)); row.appendChild(el("span", "ttl", n.title)); card.appendChild(row);
+  const m = el("div", "row");
+  m.appendChild(el("span", "chip st", ST[s]));
+  if (TYPE[n.type]) m.appendChild(el("span", "chip", TYPE[n.type]));
+  if (n.owner) m.appendChild(el("span", "chip", n.owner));
+  if (n.date) m.appendChild(el("span", "chip", n.date + (n.updated && n.updated !== n.date ? " → " + n.updated : "")));
+  if (kidsOf(n.id).length) { const [a, t] = leaves(n); m.appendChild(el("span", "chip", "完成 " + a + "/" + t)); }
+  card.appendChild(m);
+  if (n.next && s !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "下一步 ")); p.appendChild(document.createTextNode(n.next)); card.appendChild(p); }
   const bl = (n.blocked_by || []).filter(id => nodes[id] && rollup(nodes[id]) !== "done");
   if (bl.length) card.appendChild(el("div", "blk", "等 " + bl.map(id => nodes[id].title).join("、")));
-  if (n.type === "decision" && n.status === "decide") card.appendChild(optionRow(n));
-  if (ks.length) {
-    const box = el("div", "kids");
-    ks.slice().sort((a, b) => RANK[rollup(b)] - RANK[rollup(a)]).forEach(k => { const b = el("button", "kid"); b.type = "button"; b.appendChild(el("i", "dot s-" + rollup(k))); b.appendChild(document.createTextNode(shorten(k.title, 18))); b.addEventListener("click", () => { go(n.id); setTimeout(() => open(k.id), 0); }); box.appendChild(b); });
-    card.appendChild(box);
-    const acts = el("div", "actions"); const b = el("button", "btn", "进入 " + shorten(n.title, 10) + " →"); b.type = "button"; b.addEventListener("click", () => go(n.id)); acts.appendChild(b); card.appendChild(acts);
+  if (Array.isArray(n.links) && n.links.length) {
+    const L = el("div", "row");
+    n.links.forEach(l => { if (l && l.url && /^https:\/\//.test(l.url)) { const a = el("a", null, l.label || "链接"); a.href = l.url; a.target = "_blank"; a.rel = "noopener"; L.appendChild(a); } });
+    card.appendChild(L);
   }
+  if (n.type === "decision" && n.status === "decide") card.appendChild(optionRow(n));
+  if (d.children) card.appendChild(kidList(d));
+}
+function kidList(d) {
+  const box = el("div", "kids");
+  d.children.forEach(c => {
+    const b = el("button", "kid"); b.type = "button";
+    b.appendChild(el("i", "dot s-" + st(c))); b.appendChild(el("span", "t", c.data.node.title));
+    if (c.children) { const [a, t] = leaves(c.data.node); b.appendChild(el("span", "c", a + "/" + t + " ›")); }
+    else if (c.data.node.next && st(c) !== "done") b.appendChild(el("span", "c", short(c.data.node.next, 14)));
+    b.addEventListener("click", () => c.children ? zoom(c) : (focus === d ? select(c) : (zoom(d), select(c))));
+    box.appendChild(b);
+  });
+  return box;
 }
 function optionRow(n) {
   const box = el("div"); const opts = el("div", "opts");
@@ -304,10 +270,11 @@ function renderDecisions() {
   const ds = Object.values(nodes).filter(n => n.type === "decision" && n.status === "decide");
   if (!ds.length) { box.className = "empty"; box.textContent = "现在没有等你决定的事。"; return; }
   ds.forEach(n => {
-    const c = el("div", "dcard"); const q = el("div", "q", n.title); q.title = "在球上找到它";
-    q.addEventListener("click", () => { go(n.parent || null); setTimeout(() => open(n.id), 0); stage.scrollIntoView({ block: "nearest" }); });
+    const c = el("div", "dcard"); const q = el("div", "q", n.title); q.title = "在圆里找到它";
+    q.addEventListener("click", () => { const d = findById(n.id); if (d) { zoom(d.parent); select(d); document.querySelector(".stage").scrollIntoView({ block: "nearest" }); } });
     c.appendChild(q);
-    const path = pathTo(n.parent).map(p => p.title); if (path.length) c.appendChild(el("div", "next", path.join(" › ")));
+    const path = []; let p = n.parent && nodes[n.parent]; while (p) { path.unshift(p.title); p = p.parent && nodes[p.parent]; }
+    if (path.length) c.appendChild(el("div", "next", path.join(" › ")));
     c.appendChild(optionRow(n)); box.appendChild(c);
   });
 }
@@ -317,27 +284,28 @@ function renderLog() {
   if (!rows.length) { ol.appendChild(el("li", "empty", "还没有动态。")); return; }
   rows.slice(0, 20).forEach(r => { const li = el("li"); li.appendChild(el("time", null, r.ts || "")); li.appendChild(el("span", null, r.text || "")); ol.appendChild(li); });
 }
-function renderAll(relayout) {
-  if (focusId && !nodes[focusId]) focusId = null;
-  if (relayout) layout();
-  renderCrumbs(); renderCard(); renderDecisions(); renderLog();
+function renderAll() {
+  const keepFocus = focus && focus.data.id, keepSel = selected && selected.data.id;
+  build();
+  focus = (keepFocus && findById(keepFocus)) || root;
+  selected = (keepSel && findById(keepSel)) || focus;
+  view = [focus.x, focus.y, focus.r * 2.08];
+  draw(); renderCrumbs(); renderCard(); renderDecisions(); renderLog();
   document.getElementById("stamp").textContent = meta && meta.snapshot ? "最近同步 " + meta.snapshot : "还没有同步过";
 }
-document.getElementById("showDone").addEventListener("change", e => { showDone = e.target.checked; try { localStorage.setItem("ttShowDone", showDone ? "1" : "0"); } catch (x) {} layout(); });
-window.addEventListener("resize", resize);
-try { const h = decodeURIComponent((location.hash || "").slice(1)); if (h) focusId = h; } catch (e) {}
-resize(); layout(); renderAll(false); requestAnimationFrame(tick);
+document.getElementById("hideDone").addEventListener("change", e => { hideDone = e.target.checked; try { localStorage.setItem("ttHideDone", hideDone ? "1" : "0"); } catch (x) {} renderAll(); });
+let rt = null; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => renderAll());
+renderAll();
+try { const h = decodeURIComponent((location.hash || "").slice(1)); if (h) { const d = findById(h); if (d) zoom(d.children ? d : d.parent); } } catch (e) {}
 
 (async () => {
   try { db = await claude.use("db"); } catch (e) { db = null; }
   if (!db) { document.getElementById("stamp").textContent = "这个视图读不到数据（需要登录并打开原链接）。"; return; }
-  let first = true;
   db.collection("nodes").onSnapshot(snap => {
     const next = {}; let m = null;
     snap.docs.forEach(d => { const v = d.data(); if (!v) return; if (d.id === "_meta") m = v; else next[d.id] = Object.assign({ id: d.id }, v); });
-    const shapeChanged = first || Object.keys(next).sort().join() !== Object.keys(nodes).sort().join();
-    nodes = next; meta = m; first = false;
-    renderAll(shapeChanged);
+    nodes = next; meta = m; renderAll();
   }, err => { document.getElementById("stamp").textContent = "读取失败（" + ((err && err.code) || "错误") + "）。"; });
 })();
 

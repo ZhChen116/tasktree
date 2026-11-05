@@ -42,7 +42,7 @@ python3 -m tasktree rebuild         # replay the log into the node table
 
 ## Viewer
 
-`viewer/index.html` is a read-only page that shows one level of the tree as a rotatable globe: drag to spin, the node facing you is described below it, tap a node to go into its children, tap the center to go back. Decisions and recent activity are listed underneath. It reads documents shaped like `export_viewer` output from a Claude artifact `db` capability; Claude copies the export into it.
+`viewer/index.html` is a read-only page that draws the whole tree as nested circles (zoomable circle packing, d3): circle size is the amount of work, color is status, a parent's border shows its most urgent child. Tap a circle to zoom into it, tap empty space to zoom out; the selected node's details, pending decisions and recent activity are listed underneath. It reads documents shaped like `export_viewer` output from a Claude artifact `db` capability; Claude copies the export into it.
 
 ## Tests
 
