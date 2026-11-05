@@ -241,3 +241,13 @@ def test_server_survives_garbage_input(tmp_path):
     s.serve(io.StringIO('not json\n{"jsonrpc":"2.0","id":7,"method":"ping"}\n'), out)
     lines = [json.loads(x) for x in out.getvalue().splitlines()]
     assert lines[0]["error"]["code"] == -32700 and lines[1]["result"] == {}
+
+
+def test_export_carries_each_nodes_own_history(conn):
+    seed(conn)
+    store.apply_event(conn, ev("add_note", {"id": "paper.a.submit", "text": "draft sent"}, minutes=5))
+    store.apply_event(conn, ev("update_node", {"id": "paper.a.submit", "fields": {"owner": "me"}}, minutes=6))
+    store.apply_event(conn, ev("update_node", {"id": "paper.a.submit", "fields": {"status": "done"}}, minutes=7))
+    trail = store.export_for_viewer(conn)["paper.a.submit"]["trail"]
+    assert [t["kind"] for t in trail] == ["create", "note", "done"]   # the owner-only update is left out
+    assert trail[1] == {"ts": "11-04", "kind": "note", "text": "draft sent"}

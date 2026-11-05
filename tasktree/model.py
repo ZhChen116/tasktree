@@ -13,6 +13,7 @@ from typing import Callable, Optional
 STATUSES = ("decide", "blocked", "doing", "waiting", "done")
 # Higher rank wins when rolling a parent's status up from its children.
 RANK = {"decide": 5, "blocked": 4, "doing": 3, "waiting": 2, "done": 1}
+STATUS_LABEL = {"decide": "等你决定", "blocked": "卡住", "doing": "开始做", "waiting": "进入等待", "done": "完成"}
 TYPES = ("workstream", "project", "task", "decision", "deliverable", "job")
 EVENT_TYPES = ("create_node", "update_node", "add_note", "move_node", "answer_decision", "archive_node")
 UPDATABLE = ("title", "type", "status", "owner", "next", "blocked_by", "links", "options", "order", "date")

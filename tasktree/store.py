@@ -217,7 +217,29 @@ def _mmdd(iso: Optional[str]) -> Optional[str]:
     return iso[5:10] if iso and len(iso) >= 10 else None
 
 
-def export_for_viewer(conn, recent: int = 40) -> dict[str, dict]:
+def trail_step(e: dict) -> dict | None:
+    """One step of a node's own history, without the title (the viewer already shows it).
+    Updates that change neither status nor next step are left out."""
+    p = json.loads(e["payload"]) if isinstance(e.get("payload"), str) else (e.get("payload") or {})
+    t, f = e["type"], p.get("fields") or {}
+    if t == "create_node":
+        kind, text = "create", "记下这件事"
+    elif t == "add_note":
+        kind, text = "note", p.get("text", "")
+    elif t == "answer_decision":
+        kind, text = "answer", f"决定：{p.get('answer')}"
+    elif t == "update_node" and "status" in f:
+        kind, text = f["status"], model.STATUS_LABEL.get(f["status"], f["status"]) + (f"；下一步：{f['next']}" if f.get("next") else "")
+    elif t == "update_node" and f.get("next"):
+        kind, text = "next", f"下一步改为：{f['next']}"
+    elif t == "move_node":
+        kind, text = "move", f"移到 {p.get('parent')}"
+    else:
+        return None
+    return {"ts": e["ts"][5:10], "kind": kind, "text": text}
+
+
+def export_for_viewer(conn, recent: int = 40, trail_max: int = 12) -> dict[str, dict]:
     """Documents for the viewer page: one per node (same fields as the original project-tree page)
     plus `_meta` with a snapshot time and the most recent events."""
     docs: dict[str, dict] = {}
@@ -231,6 +253,15 @@ def export_for_viewer(conn, recent: int = 40) -> dict[str, dict]:
             if n.get(k):
                 doc[k] = n[k]
         docs[n["id"]] = doc
+    # Each node's own history, oldest first, so the viewer can draw a leaf's progress as a tree.
+    for r in conn.execute("SELECT ts, type, node_id, payload FROM events ORDER BY seq"):
+        if r["node_id"] in docs:
+            step = trail_step(dict(r))
+            if step:
+                docs[r["node_id"]].setdefault("trail", []).append(step)
+    for doc in docs.values():
+        if len(doc.get("trail", [])) > trail_max:
+            doc["trail"] = doc["trail"][:1] + doc["trail"][-(trail_max - 1):]
     rows = conn.execute(
         "SELECT e.ts, e.type, e.node_id, e.payload, n.title FROM events e LEFT JOIN nodes n ON n.id = e.node_id "
         "ORDER BY e.seq DESC LIMIT ?", (recent,)).fetchall()

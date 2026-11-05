@@ -88,6 +88,23 @@ button.copy { font: inherit; font-size: .78rem; border: 1px solid var(--rule); b
 .kid:hover .t { color: var(--accent); }
 .kid span.t { flex: 1; overflow-wrap: anywhere; }
 .kid span.c { font-family: var(--mono); font-size: .74rem; color: var(--muted); white-space: nowrap; }
+.ptree { display: grid; gap: 6px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.ptree ul { list-style: none; margin: 0 0 0 4px; padding: 0 0 0 14px; border-left: 1px solid var(--rule); }
+.ptree > ul { margin-left: 0; padding-left: 0; border-left: 0; }
+.ptree li { position: relative; padding: 3px 0; min-width: 0; }
+.ptree ul ul > li::before { content: ""; position: absolute; left: -14px; top: 14px; width: 10px; border-top: 1px solid var(--rule); }
+.ptree .r { display: flex; align-items: baseline; gap: 8px; font-size: .86rem; min-width: 0; }
+.ptree .r .dot { position: relative; top: 1px; }
+.ptree .r span.t { flex: 1; overflow-wrap: anywhere; }
+.ptree .r time { font-family: var(--mono); font-size: .72rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ptree button.r { font: inherit; border: 0; background: none; color: var(--muted); padding: 0; cursor: pointer; text-align: left; width: 100%; }
+.ptree button.r:hover span.t { color: var(--accent); }
+.ptree .head { font-weight: 600; color: var(--fg); }
+.ptree .cur > .r { font-weight: 600; color: var(--fg); background: var(--chip-bg); border-radius: 8px; padding: 3px 8px; margin-left: -8px; }
+.ptree .step .r { color: var(--fg); }
+.ptree .step.k-create .dot, .ptree .step.k-note .dot, .ptree .step.k-next .dot, .ptree .step.k-move .dot { background: var(--chip-bg); box-shadow: 0 0 0 1px var(--muted) inset; }
+.ptree .step.k-answer .dot { background: var(--decide); }
+.ptree .step.todo .r span.t { border: 1px dashed var(--muted); border-radius: 8px; padding: 2px 8px; color: var(--muted); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .panel { background: var(--panel); border-radius: 16px; padding: 14px 18px; min-width: 0; box-shadow: 0 1px 0 var(--rule) inset; }
@@ -394,6 +411,43 @@ function renderCard() {
   if (ses) card.appendChild(sessionRow(ses));
   if (n.type === "decision" && n.status === "decide") card.appendChild(optionRow(n));
   if (d.children) card.appendChild(kidList(d));
+  else if (d.parent && d.parent.data.id !== "__root") card.appendChild(progressTree(d, s));
+}
+// A leaf opens as a small tree: its parent at the top, the siblings as branches,
+// and the leaf itself unfolded into its own history and the next step.
+function progressTree(d, s) {
+  const box = el("div", "ptree"), top = el("ul"), head = el("li");
+  box.appendChild(el("div", "eyebrow", "进展树"));
+  const row = (cls, dotCls, text, ts) => {
+    const r = el("div", "r" + (cls ? " " + cls : "")); r.appendChild(el("i", "dot " + dotCls)); r.appendChild(el("span", "t", text));
+    if (ts) r.appendChild(el("time", null, ts)); return r;
+  };
+  head.appendChild(row("head", "s-" + st(d.parent), d.parent.data.node.title));
+  const sibs = el("ul");
+  (d.parent.children || []).forEach(c => {
+    const li = el("li");
+    if (c === d) {
+      li.className = "cur"; li.appendChild(row(null, "s-" + s, c.data.node.title));
+      const steps = el("ul");
+      const trail = (c.data.node.trail || []).slice(), last = trail[trail.length - 1];
+      if (last && last.kind === "next" && s !== "done" && last.text.endsWith(c.data.node.next)) trail.pop();  // shown below as the open step
+      trail.forEach(t => {
+        const k = el("li", "step k-" + t.kind);
+        k.appendChild(row(null, ST[t.kind] ? "s-" + t.kind : "", t.text, t.ts)); steps.appendChild(k);
+      });
+      if (c.data.node.next && s !== "done") { const k = el("li", "step todo"); k.appendChild(row(null, "s-waiting", "下一步：" + c.data.node.next)); steps.appendChild(k); }
+      if (steps.children.length) li.appendChild(steps);
+    } else {
+      const b = el("button", "r"); b.type = "button";
+      b.appendChild(el("i", "dot s-" + st(c))); b.appendChild(el("span", "t", c.data.node.title));
+      if (c.children) { const ls = leafStats(c.data.node), tot = Object.values(ls).reduce((a, x) => a + x, 0); b.appendChild(el("time", null, (ls.done || 0) + "/" + tot)); }
+      b.addEventListener("click", () => c.children ? zoom(c) : select(c));
+      li.appendChild(b);
+    }
+    sibs.appendChild(li);
+  });
+  head.appendChild(sibs); top.appendChild(head); box.appendChild(top);
+  return box;
 }
 // The Claude session that works on this node: its own, else the nearest ancestor's.
 function sessionFor(d) {
