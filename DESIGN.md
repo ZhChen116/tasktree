@@ -1,113 +1,122 @@
-# TaskTree 设计文档
+# TaskTree design notes
 
-这份文档用一份小型后端系统设计清单里的 8 个设计问题，说明 TaskTree 为什么长成现在这样。它和经典的"积分奖励"练习题（Rewards Checker）是同一个骨架：**一串事件流进来 → 逐个应用 → 更新数据库里的状态 → 有人来查**。不同的是，这里的"状态"是一棵树，"producer"是好几个同时在跑的 Claude session。
+This document walks through the 8 questions of a small backend system design checklist to explain why TaskTree is built the way it is. It has the same skeleton as the classic "rewards checker" exercise: **a stream of events comes in → each is applied in order → state in a database is updated → someone queries it**. The differences are that the state here is a tree, and the producers are several Claude sessions running at the same time.
 
-## 0. 先看一个具体例子
+## 0. A concrete example first
 
-某一天，几个对话框里发生了这些事（简化）：
+Suppose these things happen across a few sessions in one day (simplified):
 
-| 时间 | 谁写的 | 事件 | 树上的变化 |
+| Time | Written by | Event | Change to the tree |
 |---|---|---|---|
-| 10:36 | 论文 A 的 session | `update_node(paper.a.table, status=done)` | 补充材料里的表格完成 |
-| 12:37 | 论文 A 的 session | `add_note(paper.a, "代码修复已上传")` | 论文 A 节点多一条带时间的记录 |
-| 14:10 | 论文 B 的 session | `ask_decision(paper.b.run, options=[开始, 先不])` | 论文 B 这一枝变成"等你决定" |
-| 14:10 | 论文 B 的 session（网络抖动，重发） | 同一个 `event_id` 再发一次 | 什么都不变，返回 duplicate |
-| 21:40 | 总控 session | `answer_decision(paper.b.run, "开始")` | 决定完成，论文 B 回到"在做" |
+| 10:36 | Paper A session | `update_node(paper.a.table, status=done)` | The supplementary table is done |
+| 12:37 | Paper A session | `add_note(paper.a, "code fix uploaded")` | Paper A gets a timestamped note |
+| 14:10 | Paper B session | `ask_decision(paper.b.run, options=[start, wait])` | The Paper B branch now "needs a decision" |
+| 14:10 | Paper B session (network hiccup, retry) | The same `event_id` is sent again | Nothing changes; the call returns duplicate |
+| 21:40 | Hub session | `answer_decision(paper.b.run, "start")` | The decision is done; Paper B is back to "doing" |
 
-最后问"我今天做了什么"，就是把 11 月 4 日的事件按时间列出来；问"现在卡在哪"，就是把树上没完成的叶子按状态分组。
+"What did I do today?" is then the list of that day's events in time order. "Where am I stuck?" is the open leaves of the tree, grouped by status.
 
-## 1. Q1 事件是什么，从哪里来
+## 1. Q1: What are the events, and where do they come from?
 
-六种事件：`create_node`、`update_node`、`add_note`、`move_node`、`answer_decision`、`archive_node`。每个事件有：
+There are six event types: `create_node`, `update_node`, `add_note`, `move_node`, `answer_decision` and `archive_node`. Each event has:
 
-- `event_id`：idempotency key（去重键）。调用方可以自己给，比如重试时沿用同一个；不给就随机生成。
-- `ts`：本地时间（带时区）和对应的 epoch 秒数。
-- `type`、`payload`（比如 `{"id": "paper.a", "text": "..."}`）、`source`（哪个 session 写的）。
+- `event_id`: the idempotency key. A caller can supply one (for example, reuse it on retry); otherwise a random one is generated.
+- `ts`: local time (with time zone) and the matching epoch seconds.
+- `type`, `payload` (for example `{"id": "paper.a", "text": "..."}`) and `source` (which session wrote it).
 
-来源有三个：每个 Claude session 通过 MCP 工具写；ZH 在终端用 `python3 -m tasktree` 写；viewer 页面上点的决定，由 Claude 读回来后写成 `answer_decision`。
+Events come from three places: Claude sessions writing through MCP tools; the owner writing from a terminal with `python3 -m tasktree`; and decisions clicked on the viewer page, which Claude reads back and writes as `answer_decision`.
 
-## 2. Q2 状态，以及按什么 key 存
+## 2. Q2: What is the state, and what is it keyed by?
 
-| 表 | 四类状态里的哪一类 | key |
+| Table | Which kind of state | Key |
 |---|---|---|
-| `events` | 处理记录，也是唯一的真相（source of truth） | `event_id` UNIQUE；`seq` 决定重放顺序 |
-| `nodes` | 业务状态：树的当前样子（materialized view） | `id`，例如 `job.x.prep` |
-| `notes` | 产出记录：每条带时间的笔记 | 每行对应一个 `event_id` |
+| `events` | Processing record, and the single source of truth | `event_id` UNIQUE; `seq` fixes replay order |
+| `nodes` | Business state: the current shape of the tree (a materialized view) | `id`, e.g. `job.x.prep` |
+| `notes` | Output record: each timestamped note | One row per `event_id` |
 
-没有"消费位置"（offset）这一类，因为这里没有 feed 文件：事件一到就在同一个事务里应用，不存在"读到哪了"的问题。
+There is no "consumer position" (offset), because there is no feed file: each event is applied in the same transaction it arrives in, so there is never a question of "how far have we read".
 
-为什么同时存 `events` 和 `nodes`：`nodes` 里的 `status` 是被覆盖写的，从 `doing` 改成 `done` 之后，旧值就没了。`events` 保留了完整历史，所以既能回答"它现在是什么状态"，也能回答"它是什么时候、被谁改成这样的"。这就是 event sourcing（事件溯源）；`nodes` 是为了查询快而缓存的计算结果。
+Why store both `events` and `nodes`: `status` in `nodes` is overwritten, so once it changes from `doing` to `done` the old value is gone. `events` keeps the full history, so the system can answer both "what is its status now" and "when, and by whom, was it changed to this". That is event sourcing; `nodes` is a cached result kept for fast queries.
 
-## 3. Q3 Invariants（不能被破坏的规则）
+## 3. Q3: Invariants
 
-- **I1**：同一个 `event_id` 最多应用一次。用 `events.event_id UNIQUE` 加 `INSERT OR IGNORE` 保证。同一个 `event_id` 配上不同内容会被拒绝，因为那说明调用方把 key 用错了。
-- **I2**：`nodes` 和 `notes` 永远等于"把 `events` 从头重放一遍"的结果。所有写入都在同一个事务里；`rebuild` 命令可以随时重放来验证。
-- **I3**：树没有环，每个 `parent` 都存在。由 `decide` 在移动和新建时检查。
-- **I4**：被拒绝的事件什么都不改，也不进日志。
-- **I5**：多个 session 同时写，不丢更新。
+- **I1**: An `event_id` is applied at most once. Guaranteed by `events.event_id UNIQUE` plus `INSERT OR IGNORE`. The same `event_id` with different content is rejected, since it means the caller misused the key.
+- **I2**: `nodes` and `notes` always equal the result of replaying `events` from the start. Every write happens in one transaction, and the `rebuild` command can replay at any time to check.
+- **I3**: The tree has no cycles and every `parent` exists. `decide` checks this on create and move.
+- **I4**: A rejected event changes nothing and is not logged.
+- **I5**: Concurrent writes from several sessions never lose an update.
 
-## 4. Q4 需要明确的语义
+## 4. Q4: Semantics that need to be pinned down
 
-- **父节点的状态怎么算**：叶子显示自己的状态；父节点显示"未完成子节点"和"自己"之中最紧急的状态；子节点全部完成时，父节点算完成，除非它自己明确标着在做、卡住或等你决定（说明还有没拆出来的工作）。紧急程度：等你决定 > 卡住 > 在做 > 等待 > 完成。这和作者原有的项目树页面规则一致。
-- **删除**：不删除，只归档（`archive_node`）。历史一直保留在日志里。
-- **决定**：决定节点带 `options`，答案必须是其中之一；答完就标记为完成。
-- **"今天"**：按本地日期（America/Chicago）算，不按 UTC。
+- **Status of a parent**: a leaf shows its own status. A parent shows the most urgent status among its open children and itself. When all children are done, the parent counts as done, unless it is itself explicitly marked doing, blocked or needs a decision (meaning there is work not yet split out). Urgency order: needs decision > blocked > doing > waiting > done.
+- **Deletion**: nothing is deleted, only archived (`archive_node`). History always stays in the log.
+- **Decisions**: a decision node carries `options`, and the answer must be one of them. Answering marks it done.
+- **"Today"**: computed by local date (America/Chicago), not UTC.
 
-## 5. Q5 部件和数据归属
+## 5. Q5: Components and data ownership
 
 ```text
 Claude session A ─┐
 Claude session B ─┼─ MCP (stdio) ─▶ store.apply_event ─▶ SQLite (~/.tasktree/tasktree.db)
-终端 CLI ─────────┘                                         │
+Terminal CLI ─────┘                                         │
                                                             ▼ export_viewer
-                                         Claude artifact 页面（只读视图，手机可看）
+                                         Claude artifact page (read-only view, works on a phone)
 ```
 
-- `store.py` 是唯一写 SQL 的模块。
-- 每个 Claude session 会启动自己的 MCP server 进程，所以**写入者不止一个**。这一点和 Rewards Checker 的 single writer 不同，因此需要 Q6 里的锁。
-- 数据库文件放在仓库之外（`~/.tasktree/`），公开的代码仓库里不会有任何个人数据。
+- `store.py` is the only module that writes SQL.
+- Every Claude session starts its own MCP server process, so there is **more than one writer**. This differs from the single-writer rewards checker, and is why the locking in Q6 is needed.
+- The database file lives outside the repository (`~/.tasktree/`), so the public code repository never contains personal data.
 
-## 6. Q6 漏洞清单（10 类常见漏洞）
+## 6. Q6: Failure checklist (10 common failure modes)
 
-| # | 会不会遇到 | 本系统的防法 |
+| # | Does it apply? | How this system handles it |
 |---|---|---|
-| 1 重复事件 | 会：工具调用超时后 Claude 可能重发 | `event_id` UNIQUE，`INSERT OR IGNORE` 是事务第一句 |
-| 2 并发写入 | 会：多个 session 同时写 | 每次写入是一个 `BEGIN IMMEDIATE` 事务，先拿写锁再读节点；`busy_timeout` 30 秒排队。由于事务第一句就是写（去重插入），读节点一定发生在拿到写锁之后 |
-| 3 中途崩溃 | 会：进程被 kill | 事件、节点、笔记在同一个事务里，要么都写入，要么都不写 |
-| 4 重启 | 不太相关：没有 offset | 状态全在 SQLite；`rebuild` 能从日志恢复视图 |
-| 5 坏输入 | 会：Claude 传错字段 | `decide` 校验后抛 `InvalidEvent`，作为工具错误返回给 Claude，服务器不崩溃 |
-| 6 半行 | 部分：stdio 收到坏 JSON | 返回 JSON-RPC parse error，继续读下一行 |
-| 7 时间 | 会："今天"的边界 | 同时存本地时间和 epoch，按本地日期查询；测试用固定时钟 |
-| 8 状态无限增长 | 慢慢会 | 一年也就几千条事件，SQLite 足够；以后需要时可以给旧事件做快照 |
-| 9 外部副作用 | 有：同步到 artifact 页面 | 页面只是只读副本；同步失败不影响本地数据，下次重新导出全量即可 |
-| 10 钱 | 不涉及 | — |
+| 1 Duplicate events | Yes: Claude may resend after a tool call times out | `event_id` UNIQUE; `INSERT OR IGNORE` is the first statement in the transaction |
+| 2 Concurrent writes | Yes: several sessions write at once | Each write is one `BEGIN IMMEDIATE` transaction that takes the write lock before reading nodes; `busy_timeout` queues for 30 seconds. Since the transaction's first statement is a write (the dedup insert), node reads always happen after the write lock is held |
+| 3 Crash midway | Yes: the process can be killed | Event, node and note are written in one transaction: all or nothing |
+| 4 Restart | Mostly not relevant: no offset | All state is in SQLite; `rebuild` can recover the views from the log |
+| 5 Bad input | Yes: Claude may pass a wrong field | `decide` validates and raises `InvalidEvent`, returned to Claude as a tool error; the server does not crash |
+| 6 Partial lines | Partly: bad JSON on stdio | Return a JSON-RPC parse error and keep reading the next line |
+| 7 Time | Yes: the boundary of "today" | Store both local time and epoch, query by local date; tests use a fixed clock |
+| 8 Unbounded state | Slowly | A year is a few thousand events, fine for SQLite; old events can be snapshotted later if needed |
+| 9 External side effects | Yes: syncing to the artifact page | The page is only a read-only copy; a failed sync does not affect local data, and the next full export fixes it |
+| 10 Money | Not involved | — |
 
-## 7. Q7 核心函数
+## 7. Q7: Core functions
 
 ```text
-apply_event(conn, event) -> Result          # store.py，一个事务
+apply_event(conn, event) -> Result          # store.py, one transaction
     BEGIN IMMEDIATE
-    INSERT OR IGNORE INTO events(...)       # 去重；rowcount == 0 → duplicate
-    change = decide(event, get_node, ts)    # model.py，纯函数，只做校验和计算
-    写 nodes / notes
-    COMMIT（任何异常 → ROLLBACK）
+    INSERT OR IGNORE INTO events(...)       # dedup; rowcount == 0 → duplicate
+    change = decide(event, get_node, ts)    # model.py, pure function: validate and compute only
+    write nodes / notes
+    COMMIT (any exception → ROLLBACK)
 
-decide(event, get, now) -> Change           # 纯函数：不碰数据库
-rollup(nodes, id) -> status                 # 纯函数：从叶子往上汇总
-rebuild(conn)                               # 清空 nodes/notes，按 seq 重放全部事件
+decide(event, get, now) -> Change           # pure: never touches the database
+rollup(nodes, id) -> status                 # pure: aggregates upward from the leaves
+rebuild(conn)                               # clear nodes/notes, replay every event by seq
 ```
 
-## 8. Q8 测试
+## 8. Q8: Tests
 
-`tests/test_tasktree.py` 的每个测试对应一条 invariant：同一事件发两次只生效一次（I1）；`event_id` 被用于不同内容时拒绝（I1）；移动成环被拒绝且状态不变（I3、I4）；重放日志得到同样的树（I2）；8 个连接各写 25 条笔记，正好 200 条（I5）；两个连接同时改同一节点的不同字段，两边的最终值都保留（I5，lost update）；按本地日期取日志；MCP 握手、工具调用、工具错误、坏输入。
+Each test in `tests/test_tasktree.py` maps to an invariant:
 
-## 9. 和生产环境的对应
+- the same event sent twice takes effect once (I1);
+- an `event_id` reused for different content is rejected (I1);
+- a move that would create a cycle is rejected and the state is unchanged (I3, I4);
+- replaying the log gives the same tree (I2);
+- 8 connections writing 25 notes each give exactly 200 notes (I5);
+- two connections updating different fields of the same node at once keep both final values (I5, lost update);
+- the day log is selected by local date;
+- MCP handshake, tool calls, tool errors and bad input.
 
-| TaskTree | 规模更大时 |
+## 9. Mapping to production
+
+| TaskTree | At larger scale |
 |---|---|
-| SQLite 文件 + `BEGIN IMMEDIATE` | Postgres + 行锁或带条件的 `UPDATE` |
-| `events` 表 | Kafka topic 或 event store |
-| `nodes` 表 | 物化视图 / read model（CQRS，command query responsibility segregation） |
-| artifact 页面同步 | 订阅事件流、增量更新的前端 |
+| SQLite file + `BEGIN IMMEDIATE` | Postgres + row locks or a conditional `UPDATE` |
+| `events` table | Kafka topic or an event store |
+| `nodes` table | Materialized view / read model (CQRS, command query responsibility segregation) |
+| Syncing the artifact page | A frontend that subscribes to the event stream and updates incrementally |
 
-参考：Kleppmann, *Designing Data-Intensive Applications*，"Transactions" 和 "Stream Processing" 两章（事件日志、派生状态、不可变性）。
+Reference: Kleppmann, *Designing Data-Intensive Applications*, the "Transactions" and "Stream Processing" chapters (event logs, derived state, immutability).

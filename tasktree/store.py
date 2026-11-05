@@ -223,17 +223,17 @@ def trail_step(e: dict) -> dict | None:
     p = json.loads(e["payload"]) if isinstance(e.get("payload"), str) else (e.get("payload") or {})
     t, f = e["type"], p.get("fields") or {}
     if t == "create_node":
-        kind, text = "create", "记下这件事"
+        kind, text = "create", "created"
     elif t == "add_note":
         kind, text = "note", p.get("text", "")
     elif t == "answer_decision":
-        kind, text = "answer", f"决定：{p.get('answer')}"
+        kind, text = "answer", f"decided: {p.get('answer')}"
     elif t == "update_node" and "status" in f:
-        kind, text = f["status"], model.STATUS_LABEL.get(f["status"], f["status"]) + (f"；下一步：{f['next']}" if f.get("next") else "")
+        kind, text = f["status"], model.STATUS_LABEL.get(f["status"], f["status"]) + (f"; next: {f['next']}" if f.get("next") else "")
     elif t == "update_node" and f.get("next"):
-        kind, text = "next", f"下一步改为：{f['next']}"
+        kind, text = "next", f"next step: {f['next']}"
     elif t == "move_node":
-        kind, text = "move", f"移到 {p.get('parent')}"
+        kind, text = "move", f"moved under {p.get('parent')}"
     else:
         return None
     return {"ts": e["ts"][5:10], "kind": kind, "text": text}
@@ -278,19 +278,19 @@ def describe(e: dict) -> dict:
     title = e.get("title") or p.get("title") or e.get("node_id")
     t = e["type"]
     if t == "create_node":
-        text = f"新建 {title}"
+        text = f"created {title}"
     elif t == "update_node":
         f = p.get("fields") or {}
-        parts = [f"状态→{f['status']}" if "status" in f else None,
-                 f"下一步：{f['next']}" if f.get("next") else None]
-        parts = [x for x in parts if x] or ["更新 " + ", ".join(f)]
-        text = f"{title}：" + "；".join(parts)
+        parts = [f"status → {f['status']}" if "status" in f else None,
+                 f"next: {f['next']}" if f.get("next") else None]
+        parts = [x for x in parts if x] or ["updated " + ", ".join(f)]
+        text = f"{title}: " + "; ".join(parts)
     elif t == "add_note":
-        text = f"{title}：{p.get('text', '')}"
+        text = f"{title}: {p.get('text', '')}"
     elif t == "move_node":
-        text = f"移动 {title} → {p.get('parent')}"
+        text = f"moved {title} → {p.get('parent')}"
     elif t == "answer_decision":
-        text = f"决定 {title}：{p.get('answer')}"
+        text = f"decided {title}: {p.get('answer')}"
     else:
-        text = f"归档 {title}"
+        text = f"archived {title}"
     return {"ts": e["ts"][5:16].replace("T", " "), "node": e.get("node_id"), "text": text}

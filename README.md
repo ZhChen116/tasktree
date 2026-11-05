@@ -17,7 +17,7 @@ A personal task tree that Claude keeps up to date. Every piece of work (papers, 
 - **Safe with many writers**: each Claude session runs its own server process; SQLite `BEGIN IMMEDIATE` serializes their writes.
 - **No dependencies**: Python 3.10+ standard library only, including the MCP stdio server.
 
-Design notes (in Chinese, following an 8-question backend design checklist): [DESIGN.md](DESIGN.md).
+Design notes (following an 8-question backend design checklist): [DESIGN.md](DESIGN.md).
 
 ## Use with Claude Code
 

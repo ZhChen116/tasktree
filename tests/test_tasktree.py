@@ -30,10 +30,10 @@ def conn(tmp_path):
 
 
 def seed(conn):
-    store.apply_event(conn, ev("create_node", {"id": "paper", "title": "论文", "type": "workstream"}))
+    store.apply_event(conn, ev("create_node", {"id": "paper", "title": "Papers", "type": "workstream"}))
     store.apply_event(conn, ev("create_node", {"id": "paper.a", "title": "Paper A", "parent": "paper", "type": "project"}, minutes=1))
-    store.apply_event(conn, ev("create_node", {"id": "paper.a.submit", "title": "投稿", "parent": "paper.a", "status": "doing"}, minutes=2))
-    store.apply_event(conn, ev("create_node", {"id": "paper.a.code", "title": "代码修复", "parent": "paper.a", "status": "done"}, minutes=3))
+    store.apply_event(conn, ev("create_node", {"id": "paper.a.submit", "title": "Submit", "parent": "paper.a", "status": "doing"}, minutes=2))
+    store.apply_event(conn, ev("create_node", {"id": "paper.a.code", "title": "Fix code", "parent": "paper.a", "status": "done"}, minutes=3))
 
 
 # ---------- pure rules ----------
@@ -102,15 +102,15 @@ def test_move_cannot_create_a_cycle_and_leaves_state_unchanged(conn):
 
 def test_decision_answer_must_be_an_option_and_marks_done(conn):
     seed(conn)
-    store.apply_event(conn, ev("create_node", {"id": "dec.award", "title": "报学生论文奖?", "parent": "paper.a",
-                                               "type": "decision", "options": ["报", "不报"]}))
+    store.apply_event(conn, ev("create_node", {"id": "dec.award", "title": "Enter student paper award?", "parent": "paper.a",
+                                               "type": "decision", "options": ["yes", "no"]}))
     assert store.load_nodes(conn)["dec.award"]["status"] == "decide"
     assert model.rollup(store.load_nodes(conn), "paper") == "decide"
     with pytest.raises(model.InvalidEvent):
         store.apply_event(conn, ev("answer_decision", {"id": "dec.award", "answer": "maybe"}))
-    store.apply_event(conn, ev("answer_decision", {"id": "dec.award", "answer": "报"}))
+    store.apply_event(conn, ev("answer_decision", {"id": "dec.award", "answer": "yes"}))
     n = store.load_nodes(conn)["dec.award"]
-    assert (n["status"], n["answer"]) == ("done", "报")
+    assert (n["status"], n["answer"]) == ("done", "yes")
 
 
 # ---------- I2 the view equals a replay of the log ----------
@@ -197,9 +197,9 @@ def test_day_log_uses_local_dates(conn):
 def test_render_hides_done_branches_by_default(conn):
     seed(conn)
     text = model.render(store.load_nodes(conn))
-    assert "[>] 论文 (paper)" in text and "投稿" in text
-    assert "代码修复" not in text
-    assert "代码修复" in model.render(store.load_nodes(conn), include_done=True)
+    assert "[>] Papers (paper)" in text and "Submit" in text
+    assert "Fix code" not in text
+    assert "Fix code" in model.render(store.load_nodes(conn), include_done=True)
 
 
 def test_export_matches_viewer_fields(conn):
@@ -207,7 +207,7 @@ def test_export_matches_viewer_fields(conn):
     docs = store.export_for_viewer(conn)
     assert docs["paper.a.submit"]["parent"] == "paper.a"
     assert docs["paper.a.submit"]["date"] == "11-04"
-    assert docs["_meta"]["recent"][0]["text"].startswith("新建")
+    assert docs["_meta"]["recent"][0]["text"].startswith("created")
 
 
 # ---------- MCP over stdio ----------
@@ -218,7 +218,7 @@ def test_mcp_handshake_and_tool_call(tmp_path):
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "add_node", "arguments": {"id": "job", "title": "求职", "type": "workstream"}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "add_node", "arguments": {"id": "job", "title": "Job search", "type": "workstream"}}},
         {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "add_node", "arguments": {"id": "job.x", "title": "x", "parent": "missing"}}},
         {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "tree", "arguments": {}}},
     ]
@@ -231,7 +231,7 @@ def test_mcp_handshake_and_tool_call(tmp_path):
     assert "add_node" in {t["name"] for t in replies[2]["result"]["tools"]}
     assert replies[3]["result"]["content"][0]["text"].startswith("ok")
     assert replies[4]["result"]["isError"] is True               # rule violation is a readable tool error
-    assert "求职 (job)" in replies[5]["result"]["content"][0]["text"]
+    assert "Job search (job)" in replies[5]["result"]["content"][0]["text"]
 
 
 def test_server_survives_garbage_input(tmp_path):

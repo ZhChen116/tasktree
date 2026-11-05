@@ -1,4 +1,4 @@
-<title>动态记事本</title>
+<title>TaskTree</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
@@ -133,10 +133,10 @@ label.tog { font-size: .78rem; color: var(--muted); display: inline-flex; gap: 6
 <div class="wrap">
   <header>
     <div class="titlebar">
-      <h1 id="treeTitle">动态记事本</h1>
-      <button id="refreshBtn" type="button" title="让 Claude 同步" aria-label="让 Claude 同步"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <h1 id="treeTitle">TaskTree</h1>
+      <button id="refreshBtn" type="button" title="Ask Claude to sync" aria-label="Ask Claude to sync"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
       <span id="refreshMsg"></span>
-      <span class="stamp" id="stamp">正在读取…</span>
+      <span class="stamp" id="stamp">Loading…</span>
     </div>
     <div class="summary" id="summary"></div>
   </header>
@@ -144,35 +144,35 @@ label.tog { font-size: .78rem; color: var(--muted); display: inline-flex; gap: 6
   <div class="main">
     <div>
       <div class="stage">
-        <div class="crumbs" id="crumbs" aria-label="位置"></div>
+        <div class="crumbs" id="crumbs" aria-label="Location"></div>
         <div class="tools">
-          <button type="button" id="zoomIn" aria-label="放大">＋</button><button type="button" id="zoomOut" aria-label="缩小">－</button>
-          <button type="button" id="resetBtn" title="回到原来的位置和大小">复位视图</button>
-          <button type="button" id="relayoutBtn" title="这一层的圆回到自动排列">恢复默认排列</button>
+          <button type="button" id="zoomIn" aria-label="Zoom in">+</button><button type="button" id="zoomOut" aria-label="Zoom out">−</button>
+          <button type="button" id="resetBtn" title="Back to the original position and size">Reset view</button>
+          <button type="button" id="relayoutBtn" title="Put the circles on this level back in automatic layout">Default layout</button>
         </div>
-        <div class="gesture" aria-hidden="true">拖圆调整位置 · 拖空白平移 · 点圆进入</div>
-        <svg id="pack" role="img" aria-label="所有事情的嵌套圆：大圆是工作线，里面的小圆是项目和任务。点一个圆放大进去，点空白处退出一层。"></svg>
+        <div class="gesture" aria-hidden="true">Drag a circle to move it · drag empty space to pan · click a circle to enter</div>
+        <svg id="pack" role="img" aria-label="Nested circles of all work: large circles are workstreams, the smaller circles inside are projects and tasks. Click a circle to zoom in, click empty space to go up a level."></svg>
       </div>
       <div class="legend" aria-hidden="true">
-        <span><i class="dot s-decide"></i>等你决定</span><span><i class="dot s-blocked"></i>卡住</span>
-        <span><i class="dot s-doing"></i>在做</span><span><i class="dot s-waiting"></i>等待</span><span><i class="dot s-done"></i>完成</span>
-        <span>大圆的颜色 = 里面最急的事</span>
-        <label class="tog"><input type="checkbox" id="hideDone"> 隐藏已完成</label>
+        <span><i class="dot s-decide"></i>Needs decision</span><span><i class="dot s-blocked"></i>Blocked</span>
+        <span><i class="dot s-doing"></i>Doing</span><span><i class="dot s-waiting"></i>Waiting</span><span><i class="dot s-done"></i>Done</span>
+        <span>A large circle takes the color of its most urgent item</span>
+        <label class="tog"><input type="checkbox" id="hideDone"> Hide done</label>
       </div>
     </div>
-    <div class="side"><div class="card" id="card" aria-live="polite"><div class="empty">Claude 同步数据后，这里显示你点中的那件事。</div></div></div>
+    <div class="side"><div class="card" id="card" aria-live="polite"><div class="empty">After Claude syncs, the item you click shows here.</div></div></div>
   </div>
 
   <div class="cols">
-    <section class="panel" aria-labelledby="h-dec"><h2 id="h-dec">等你决定</h2><div id="decisions" class="empty">读取中。</div></section>
-    <section class="panel" aria-labelledby="h-log"><h2 id="h-log">最近动态</h2><ol class="log" id="log"><li class="empty">读取中。</li></ol></section>
+    <section class="panel" aria-labelledby="h-dec"><h2 id="h-dec">Needs your decision</h2><div id="decisions" class="empty">Loading.</div></section>
+    <section class="panel" aria-labelledby="h-log"><h2 id="h-log">Recent activity</h2><ol class="log" id="log"><li class="empty">Loading.</li></ol></section>
   </div>
 </div>
 
 <script>
-const ST = { done: "完成", doing: "在做", waiting: "等待", blocked: "卡住", decide: "等你决定" };
+const ST = { done: "Done", doing: "Doing", waiting: "Waiting", blocked: "Blocked", decide: "Needs decision" };
 const RANK = { decide: 5, blocked: 4, doing: 3, waiting: 2, done: 1 };
-const TYPE = { workstream: "工作线", project: "项目", decision: "决定", deliverable: "交付物", job: "作业", task: "任务" };
+const TYPE = { workstream: "Workstream", project: "Project", decision: "Decision", deliverable: "Deliverable", job: "Job", task: "Task" };
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let nodes = {}, meta = null, db = null, hideDone = false;
 let root = null, focus = null, selected = null, view = null, base = null, ut = d3.zoomIdentity, firstDraw = true;
@@ -205,7 +205,7 @@ function build() {
   const visible = id => !hideDone || rollup(nodes[id]) !== "done";
   const mk = id => {
     const ks = kidsOf(id === "__root" ? null : id).filter(k => visible(k.id));
-    const n = id === "__root" ? { id: "__root", title: "全部" } : nodes[id];
+    const n = id === "__root" ? { id: "__root", title: "All" } : nodes[id];
     return { id, node: n, children: ks.length ? ks.map(k => mk(k.id)) : undefined };
   };
   const h = d3.hierarchy(mk("__root"))
@@ -356,7 +356,7 @@ function findById(id) { return root && root.descendants().find(d => d.data.id ==
 function renderSummary() {
   const box = document.getElementById("summary"); box.textContent = "";
   const ls = Object.values(nodes).filter(n => !kidsOf(n.id).length), cnt = s => ls.filter(n => n.status === s).length;
-  [["decide", "件等你决定"], ["blocked", "件卡住"], ["doing", "件在做"], ["waiting", "件等待"]].forEach(([s, label]) => {
+  [["decide", " need a decision"], ["blocked", " blocked"], ["doing", " doing"], ["waiting", " waiting"]].forEach(([s, label]) => {
     const n = cnt(s); if (!n && s === "blocked") return;
     const k = el("span", "k"); k.appendChild(el("i", "dot s-" + s)); k.appendChild(el("b", null, String(n))); k.appendChild(document.createTextNode(label)); box.appendChild(k);
   });
@@ -366,7 +366,7 @@ function renderCrumbs() {
   if (!focus || focus === root) return;
   focus.ancestors().reverse().forEach((d, i, path) => {
     if (i) c.appendChild(el("span", "sep", "›"));
-    const name = d.data.id === "__root" ? "全部" : d.data.node.title;
+    const name = d.data.id === "__root" ? "All" : d.data.node.title;
     if (i === path.length - 1) c.appendChild(el("b", null, short(name, 16)));
     else { const b = el("button", null, short(name, 10)); b.type = "button"; b.addEventListener("click", () => zoom(d)); c.appendChild(b); }
   });
@@ -381,9 +381,9 @@ function renderCard() {
   const d = selected || focus;
   if (!d || d.data.id === "__root") {
     card.style.setProperty("--st", "var(--accent)");
-    card.appendChild(el("div", "eyebrow", "全部工作线"));
-    card.appendChild(el("div", "ttl", Object.keys(nodes).length ? "点一个圆，进入那条工作线" : "还没有数据"));
-    if (!Object.keys(nodes).length) card.appendChild(el("div", "empty", "在任何一个 Claude session 里说“同步记事本”。"));
+    card.appendChild(el("div", "eyebrow", "All workstreams"));
+    card.appendChild(el("div", "ttl", Object.keys(nodes).length ? "Click a circle to enter that workstream" : "No data yet"));
+    if (!Object.keys(nodes).length) card.appendChild(el("div", "empty", "Say \"sync TaskTree\" in any Claude session."));
     if (root && root.children) card.appendChild(kidList(root));
     return;
   }
@@ -399,12 +399,12 @@ function renderCard() {
   if (n.date) m.appendChild(el("span", "chip", n.date + (n.updated && n.updated !== n.date ? " → " + n.updated : "")));
   card.appendChild(m);
   if (kidsOf(n.id).length) card.appendChild(progressBar(n));
-  if (n.next && s !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "下一步")); p.appendChild(document.createTextNode(n.next)); card.appendChild(p); }
+  if (n.next && s !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "Next")); p.appendChild(document.createTextNode(n.next)); card.appendChild(p); }
   const bl = (n.blocked_by || []).filter(id => nodes[id] && rollup(nodes[id]) !== "done");
-  if (bl.length) card.appendChild(el("div", "blk", "等 " + bl.map(id => nodes[id].title).join("、")));
+  if (bl.length) card.appendChild(el("div", "blk", "Waiting on " + bl.map(id => nodes[id].title).join(", ")));
   if (Array.isArray(n.links) && n.links.some(l => l && /^https:\/\//.test(l.url || ""))) {
     const L = el("div", "row");
-    n.links.forEach(l => { if (l && l.url && /^https:\/\//.test(l.url)) { const a = el("a", null, l.label || "链接"); a.href = l.url; a.target = "_blank"; a.rel = "noopener"; L.appendChild(a); } });
+    n.links.forEach(l => { if (l && l.url && /^https:\/\//.test(l.url)) { const a = el("a", null, l.label || "Link"); a.href = l.url; a.target = "_blank"; a.rel = "noopener"; L.appendChild(a); } });
     card.appendChild(L);
   }
   const ses = sessionFor(d);
@@ -417,7 +417,7 @@ function renderCard() {
 // and the leaf itself unfolded into its own history and the next step.
 function progressTree(d, s) {
   const box = el("div", "ptree"), top = el("ul"), head = el("li");
-  box.appendChild(el("div", "eyebrow", "进展树"));
+  box.appendChild(el("div", "eyebrow", "Progress"));
   const row = (cls, dotCls, text, ts) => {
     const r = el("div", "r" + (cls ? " " + cls : "")); r.appendChild(el("i", "dot " + dotCls)); r.appendChild(el("span", "t", text));
     if (ts) r.appendChild(el("time", null, ts)); return r;
@@ -435,7 +435,7 @@ function progressTree(d, s) {
         const k = el("li", "step k-" + t.kind);
         k.appendChild(row(null, ST[t.kind] ? "s-" + t.kind : "", t.text, t.ts)); steps.appendChild(k);
       });
-      if (c.data.node.next && s !== "done") { const k = el("li", "step todo"); k.appendChild(row(null, "s-waiting", "下一步：" + c.data.node.next)); steps.appendChild(k); }
+      if (c.data.node.next && s !== "done") { const k = el("li", "step todo"); k.appendChild(row(null, "s-waiting", "Next: " + c.data.node.next)); steps.appendChild(k); }
       if (steps.children.length) li.appendChild(steps);
     } else {
       const b = el("button", "r"); b.type = "button";
@@ -453,7 +453,7 @@ function progressTree(d, s) {
 function sessionFor(d) {
   for (let a = d; a && a.data.id !== "__root"; a = a.parent) {
     const l = (a.data.node.links || []).find(x => x && /^claude:\/\//.test(x.url || ""));
-    if (l) return { label: l.label || "对话框", url: l.url, inherited: a !== d, from: a.data.node.title };
+    if (l) return { label: l.label || "Session", url: l.url, inherited: a !== d, from: a.data.node.title };
   }
   return null;
 }
@@ -461,16 +461,16 @@ function sessionRow(s) {
   const box = el("div", "ses");
   // claude:// links cannot be followed from inside the artifact frame, so the action is copy-then-paste.
   const cp = el("button", "sesbtn"); cp.type = "button";
-  cp.appendChild(el("span", "ico", "⧉")); cp.appendChild(el("span", null, "复制对话框链接：" + s.label));
-  const tip = el("span", "path", "复制后粘贴到浏览器地址栏，就会在 Claude app 里打开");
+  cp.appendChild(el("span", "ico", "⧉")); cp.appendChild(el("span", null, "Copy session link: " + s.label));
+  const tip = el("span", "path", "Paste it into the browser address bar to open it in the Claude app");
   cp.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(s.url); tip.textContent = "已复制。粘贴到浏览器地址栏，回车。"; }
-    catch (e) { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); tip.textContent = "复制没成功，已选中下面的链接，请手动复制。"; }
+    try { await navigator.clipboard.writeText(s.url); tip.textContent = "Copied. Paste it into the address bar and press Enter."; }
+    catch (e) { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); tip.textContent = "Copy failed. The link below is selected; copy it by hand."; }
   });
   box.appendChild(cp);
   box.appendChild(tip);
   const code = el("code", null, s.url); box.appendChild(code);
-  if (s.inherited) box.appendChild(el("div", "path", "来自上层「" + s.from + "」"));
+  if (s.inherited) box.appendChild(el("div", "path", "Inherited from \"" + s.from + "\""));
   return box;
 }
 function kidList(d) {
@@ -488,7 +488,7 @@ function optionRow(n) {
   const box = el("div"); const opts = el("div", "opts");
   (n.options || []).forEach(o => { const b = el("button", "opt" + (n.answer === o ? " chosen" : ""), o); b.type = "button"; b.addEventListener("click", () => choose(n, o, b)); opts.appendChild(b); });
   box.appendChild(opts);
-  if (n.answer) box.appendChild(el("div", "answered", "已选：" + n.answer + "（Claude 下次同步时写回）"));
+  if (n.answer) box.appendChild(el("div", "answered", "Chosen: " + n.answer + " (Claude records it at the next sync)"));
   return box;
 }
 async function choose(n, o, btn) {
@@ -496,15 +496,15 @@ async function choose(n, o, btn) {
   btn.disabled = true;
   try {
     await db.collection("nodes").doc(n.id).update({ answer: o, answered_at: new Date().toISOString() });
-    try { const c = await claude.use("comments"); if (c && (await c.canSendToClaude()) === "available") await c.sendToClaude({ anchor: await c.anchorFor(document.getElementById("h-dec")), text: "决定 " + n.id + "：" + o }); } catch (e) {}
-  } catch (e) { btn.disabled = false; btn.parentNode.after(el("div", "answered", "没记上（" + ((e && e.code) || "错误") + "），可以在评论里写给 Claude。")); }
+    try { const c = await claude.use("comments"); if (c && (await c.canSendToClaude()) === "available") await c.sendToClaude({ anchor: await c.anchorFor(document.getElementById("h-dec")), text: "decide " + n.id + ": " + o }); } catch (e) {}
+  } catch (e) { btn.disabled = false; btn.parentNode.after(el("div", "answered", "Not saved (" + ((e && e.code) || "error") + "). You can tell Claude in a comment.")); }
 }
 function renderDecisions() {
   const box = document.getElementById("decisions"); box.textContent = ""; box.className = "";
   const ds = Object.values(nodes).filter(n => n.type === "decision" && n.status === "decide");
-  if (!ds.length) { box.className = "empty"; box.textContent = "现在没有等你决定的事。"; return; }
+  if (!ds.length) { box.className = "empty"; box.textContent = "Nothing needs your decision right now."; return; }
   ds.forEach(n => {
-    const c = el("div", "dcard"); const q = el("div", "q"); q.appendChild(el("i", "dot s-decide")); q.appendChild(document.createTextNode(n.title)); q.title = "在图上找到它";
+    const c = el("div", "dcard"); const q = el("div", "q"); q.appendChild(el("i", "dot s-decide")); q.appendChild(document.createTextNode(n.title)); q.title = "Find it on the map";
     q.addEventListener("click", () => { const d = findById(n.id); if (d) { zoom(d.parent); select(d); document.querySelector(".stage").scrollIntoView({ block: "nearest" }); } });
     c.appendChild(q);
     const path = []; let p = n.parent && nodes[n.parent]; while (p) { path.unshift(p.title); p = p.parent && nodes[p.parent]; }
@@ -515,7 +515,7 @@ function renderDecisions() {
 function renderLog() {
   const ol = document.getElementById("log"); ol.textContent = "";
   const rows = (meta && Array.isArray(meta.recent)) ? meta.recent : [];
-  if (!rows.length) { ol.appendChild(el("li", "empty", "还没有动态。")); return; }
+  if (!rows.length) { ol.appendChild(el("li", "empty", "No activity yet.")); return; }
   rows.slice(0, 16).forEach(r => { const li = el("li"); li.appendChild(el("time", null, r.ts || "")); li.appendChild(el("span", null, r.text || "")); ol.appendChild(li); });
 }
 function renderAll() {
@@ -525,7 +525,7 @@ function renderAll() {
   selected = (keepSel && findById(keepSel)) || focus;
   base = view = [focus.x, focus.y, focus.r * (focus === root ? 2 : 2.1)];
   draw(); renderSummary(); renderCrumbs(); renderCard(); renderDecisions(); renderLog();
-  document.getElementById("stamp").textContent = meta && meta.snapshot ? "最近同步 " + meta.snapshot : "还没有同步过";
+  document.getElementById("stamp").textContent = meta && meta.snapshot ? "Last synced " + meta.snapshot : "Never synced";
 }
 document.getElementById("resetBtn").addEventListener("click", resetPan);
 document.getElementById("zoomIn").addEventListener("click", () => zoomBy(1.5));
@@ -540,12 +540,12 @@ try { const h = decodeURIComponent((location.hash || "").slice(1)); if (h) { con
 
 (async () => {
   try { db = await claude.use("db"); } catch (e) { db = null; }
-  if (!db) { document.getElementById("stamp").textContent = "这个视图读不到数据（需要登录并打开原链接）。"; return; }
+  if (!db) { document.getElementById("stamp").textContent = "This view cannot read the data (sign in and open the original link)."; return; }
   db.collection("nodes").onSnapshot(snap => {
     const next = {}; let m = null;
     snap.docs.forEach(d => { const v = d.data(); if (!v) return; if (d.id === "_meta") m = v; else next[d.id] = Object.assign({ id: d.id }, v); });
     nodes = next; meta = m; renderAll();
-  }, err => { document.getElementById("stamp").textContent = "读取失败（" + ((err && err.code) || "错误") + "）。"; });
+  }, err => { document.getElementById("stamp").textContent = "Failed to load (" + ((err && err.code) || "error") + ")."; });
 })();
 
 (async () => {
@@ -553,15 +553,15 @@ try { const h = decodeURIComponent((location.hash || "").slice(1)); if (h) { con
   let c = null;
   try { c = await claude.use("comments"); } catch (e) { c = null; }
   btn.addEventListener("click", async () => {
-    if (!c) { msg.textContent = "请在评论里写“同步记事本”"; return; }
-    btn.disabled = true; msg.textContent = "正在发给 Claude…";
+    if (!c) { msg.textContent = "Write \"sync TaskTree\" in a comment"; return; }
+    btn.disabled = true; msg.textContent = "Sending to Claude…";
     let ok = false, code = "";
-    try { if ((await c.canSendToClaude()) === "available") { await c.sendToClaude({ anchor: await c.anchorFor(document.getElementById("treeTitle")), text: "同步记事本" }); ok = true; } else code = "no_session"; }
+    try { if ((await c.canSendToClaude()) === "available") { await c.sendToClaude({ anchor: await c.anchorFor(document.getElementById("treeTitle")), text: "sync TaskTree" }); ok = true; } else code = "no_session"; }
     catch (e) { code = (e && e.code) || "error"; }
     btn.disabled = false;
-    if (ok) { msg.textContent = "已发给 Claude"; return; }
-    try { const r = await c.openComposer({ element: document.getElementById("treeTitle") }); msg.textContent = r && r.opened ? "写“同步记事本”，点 Send to Claude" : "发送没成功（" + code + "）"; }
-    catch (e2) { msg.textContent = "发送没成功（" + code + "）"; }
+    if (ok) { msg.textContent = "Sent to Claude"; return; }
+    try { const r = await c.openComposer({ element: document.getElementById("treeTitle") }); msg.textContent = r && r.opened ? "Write \"sync TaskTree\" and click Send to Claude" : "Sending failed (" + code + ")"; }
+    catch (e2) { msg.textContent = "Sending failed (" + code + ")"; }
   });
 })();
 </script>
