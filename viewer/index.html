@@ -46,7 +46,10 @@ h1 { font-family: var(--display); font-weight: 700; font-size: 1.6rem; margin: 0
 .crumbs button { font: inherit; border: 0; background: var(--pill); color: var(--accent); border-radius: 999px; padding: 2px 10px; cursor: pointer; box-shadow: 0 1px 3px var(--shadow); }
 .crumbs b { font-weight: 500; background: var(--pill); border-radius: 999px; padding: 2px 10px; box-shadow: 0 1px 3px var(--shadow); }
 .sep { color: var(--muted); }
-svg#pack { display: block; width: 100%; height: auto; cursor: zoom-out; }
+svg#pack { display: block; width: 100%; height: auto; cursor: grab; touch-action: none; }
+svg#pack:active { cursor: grabbing; }
+button.reset { position: absolute; right: 10px; bottom: 10px; z-index: 2; font: inherit; font-size: .78rem; border: 0; background: var(--pill); color: var(--accent); border-radius: 999px; padding: 4px 12px; cursor: pointer; box-shadow: 0 1px 3px var(--shadow); }
+.gesture { position: absolute; left: 12px; bottom: 12px; z-index: 2; font-size: .72rem; color: var(--muted); pointer-events: none; }
 svg#pack .node { cursor: pointer; transition: filter .2s; }
 svg#pack .node:hover { filter: brightness(1.06); }
 svg#pack .pill rect { fill: var(--pill); }
@@ -124,6 +127,8 @@ label.tog { font-size: .78rem; color: var(--muted); display: inline-flex; gap: 6
     <div>
       <div class="stage">
         <div class="crumbs" id="crumbs" aria-label="位置"></div>
+        <button type="button" class="reset" id="resetBtn" title="回到原来的位置和大小">复位</button>
+        <div class="gesture" aria-hidden="true">拖动平移 · 双指缩放 · 点圆进入</div>
         <svg id="pack" role="img" aria-label="所有事情的嵌套圆：大圆是工作线，里面的小圆是项目和任务。点一个圆放大进去，点空白处退出一层。"></svg>
       </div>
       <div class="legend" aria-hidden="true">
@@ -148,7 +153,7 @@ const RANK = { decide: 5, blocked: 4, doing: 3, waiting: 2, done: 1 };
 const TYPE = { workstream: "工作线", project: "项目", decision: "决定", deliverable: "交付物", job: "作业", task: "任务" };
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let nodes = {}, meta = null, db = null, hideDone = false;
-let root = null, focus = null, selected = null, view = null, firstDraw = true;
+let root = null, focus = null, selected = null, view = null, base = null, ut = d3.zoomIdentity, firstDraw = true;
 try { hideDone = localStorage.getItem("ttHideDone") === "1"; } catch (e) {}
 document.getElementById("hideDone").checked = hideDone;
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -216,7 +221,10 @@ function draw() {
   pills.append("rect").attr("filter", "url(#lift)");
   pills.append("text").attr("class", d => "t" + (d.depth === 1 ? " ws" : "")).attr("text-anchor", "middle").attr("dy", "0.35em");
   pills.append("text").attr("class", "n").attr("text-anchor", "middle").attr("dy", "0.35em");
-  const v = view || [root.x, root.y, root.r * 2];
+  // drag to pan, pinch (or ctrl/trackpad-pinch wheel) to zoom; plain wheel keeps scrolling the page
+  svg.call(zoomer).on("dblclick.zoom", null);
+  svg.property("__zoom", d3.zoomIdentity); ut = d3.zoomIdentity;
+  const v = base || [root.x, root.y, root.r * 2]; base = v;
   if (firstDraw && !reduceMotion) {
     firstDraw = false;
     svg.transition().duration(900).ease(d3.easeCubicOut).tween("grow", () => t => apply(v, t));
@@ -231,7 +239,9 @@ function apply(v, grow = 1) {
   const sel = selected && selected.depth && !selected.children ? selected : null;
   svg.select("circle.sel").attr("transform", sel ? `translate(${pos(sel)})` : null).attr("r", sel ? sel.r * k + 3 : 0).attr("opacity", sel ? 1 : 0);
   svg.selectAll("g.pill").each(function (d) {
-    const r = d.r * k, show = d.parent === focus && r > 15 && grow > 0.6, gg = d3.select(this);
+    const r = d.r * k, gg = d3.select(this);
+    // direct children of the focus always get names; deeper ones once you have pinched them big enough
+    const show = grow > 0.6 && ((d.parent === focus && r > 15) || (d.depth > focus.depth + 1 && (d.children ? r > 110 : r > 34)));
     gg.style("display", show ? null : "none"); if (!show) return;
     const [x, y] = pos(d), ws = d.depth === 1;
     const fs = Math.max(11.5, Math.min(ws ? 18 : 15, r / 3.4)), maxChars = Math.max(3, Math.floor((r * 1.9) / fs));
@@ -250,11 +260,18 @@ function apply(v, grow = 1) {
 function zoom(d) {
   focus = d; selected = d;
   const target = [d.x, d.y, d.r * 2.1];
-  const i = d3.interpolateZoom(view, target);
-  svg.transition().duration(reduceMotion ? 0 : 700).ease(d3.easeCubicInOut).tween("zoom", () => t => apply(i(t)));
+  const i = d3.interpolateZoom(view, target);   // start from what is on screen, pan/pinch included
+  svg.property("__zoom", d3.zoomIdentity); ut = d3.zoomIdentity;
+  svg.transition().duration(reduceMotion ? 0 : 700).ease(d3.easeCubicInOut).tween("zoom", () => t => { base = i(t); apply(base); });
   renderCrumbs(); renderCard();
 }
 function select(d) { selected = d; apply(view); renderCard(); }
+// The view actually shown = the focus view (base) moved by the user's pan/pinch (ut).
+function eff() { const k = W / base[2]; return [base[0] - ut.x / (k * ut.k), base[1] - ut.y / (k * ut.k), base[2] / ut.k]; }
+const zoomer = d3.zoom().scaleExtent([0.6, 8])
+  .filter(e => e.type === "wheel" ? e.ctrlKey : !e.button)
+  .on("zoom", e => { ut = e.transform; apply(eff()); });
+function resetPan() { svg.transition().duration(reduceMotion ? 0 : 400).call(zoomer.transform, d3.zoomIdentity); }
 function findById(id) { return root && root.descendants().find(d => d.data.id === id); }
 
 // ----- DOM parts -----
@@ -391,10 +408,11 @@ function renderAll() {
   build();
   focus = (keepFocus && findById(keepFocus)) || root;
   selected = (keepSel && findById(keepSel)) || focus;
-  view = [focus.x, focus.y, focus.r * (focus === root ? 2 : 2.1)];
+  base = view = [focus.x, focus.y, focus.r * (focus === root ? 2 : 2.1)];
   draw(); renderSummary(); renderCrumbs(); renderCard(); renderDecisions(); renderLog();
   document.getElementById("stamp").textContent = meta && meta.snapshot ? "最近同步 " + meta.snapshot : "还没有同步过";
 }
+document.getElementById("resetBtn").addEventListener("click", resetPan);
 document.getElementById("hideDone").addEventListener("change", e => { hideDone = e.target.checked; try { localStorage.setItem("ttHideDone", hideDone ? "1" : "0"); } catch (x) {} renderAll(); });
 let rt = null; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => renderAll());
