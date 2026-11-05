@@ -26,7 +26,9 @@ INSTRUCTIONS = (
     "At the start of substantial work, call `tree` (or `get_node`) to find where it belongs; add a node if "
     "it is new. When something changes, record it: update_node for status/next step, add_note for what "
     "happened, ask_decision when ZH must choose. Keep titles short, in the language ZH uses. Use stable, "
-    "readable ids like 'job.x.prep'. Never put passwords, codes or account numbers in notes."
+    "readable ids like 'job.x.prep'. When a project is worked on in a particular Claude session, put that "
+    "session's app link in the node's links as {label: <session title>, url: 'claude://...', kind: 'session'} "
+    "so the viewer can open it; children inherit it. Never put passwords, codes or account numbers in notes."
 )
 
 _str = {"type": "string"}

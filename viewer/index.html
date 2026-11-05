@@ -71,6 +71,12 @@ svg#pack .halo { fill: none; stroke: var(--decide); animation: halo 2.2s ease-ou
 .next { font-size: .9rem; color: var(--fg); background: var(--chip-bg); border-radius: 10px; padding: 8px 10px; overflow-wrap: anywhere; }
 .next b { font-weight: 500; color: var(--muted); margin-right: 6px; font-size: .78rem; letter-spacing: .06em; }
 .blk { font-size: .84rem; color: var(--blocked); }
+.ses { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+a.sesbtn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; background: var(--accent); color: var(--panel); border-radius: 10px; padding: 7px 14px; font-size: .9rem; font-weight: 500; max-width: 100%; }
+a.sesbtn .ico { font-family: var(--mono); }
+button.copy { font: inherit; font-size: .78rem; border: 1px solid var(--rule); background: var(--panel); color: var(--muted); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.ses code { flex-basis: 100%; font-family: var(--mono); font-size: .7rem; color: var(--muted); overflow-wrap: anywhere; user-select: all; }
+.ses .path { flex-basis: 100%; }
 .bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--chip-bg); }
 .bar i { display: block; height: 100%; }
 .kids { display: grid; }
@@ -301,13 +307,38 @@ function renderCard() {
   if (n.next && s !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "下一步")); p.appendChild(document.createTextNode(n.next)); card.appendChild(p); }
   const bl = (n.blocked_by || []).filter(id => nodes[id] && rollup(nodes[id]) !== "done");
   if (bl.length) card.appendChild(el("div", "blk", "等 " + bl.map(id => nodes[id].title).join("、")));
-  if (Array.isArray(n.links) && n.links.length) {
+  if (Array.isArray(n.links) && n.links.some(l => l && /^https:\/\//.test(l.url || ""))) {
     const L = el("div", "row");
     n.links.forEach(l => { if (l && l.url && /^https:\/\//.test(l.url)) { const a = el("a", null, l.label || "链接"); a.href = l.url; a.target = "_blank"; a.rel = "noopener"; L.appendChild(a); } });
     card.appendChild(L);
   }
+  const ses = sessionFor(d);
+  if (ses) card.appendChild(sessionRow(ses));
   if (n.type === "decision" && n.status === "decide") card.appendChild(optionRow(n));
   if (d.children) card.appendChild(kidList(d));
+}
+// The Claude session that works on this node: its own, else the nearest ancestor's.
+function sessionFor(d) {
+  for (let a = d; a && a.data.id !== "__root"; a = a.parent) {
+    const l = (a.data.node.links || []).find(x => x && /^claude:\/\//.test(x.url || ""));
+    if (l) return { label: l.label || "对话框", url: l.url, inherited: a !== d, from: a.data.node.title };
+  }
+  return null;
+}
+function sessionRow(s) {
+  const box = el("div", "ses");
+  const a = el("a", "sesbtn"); a.href = s.url;
+  a.appendChild(el("span", "ico", "↗")); a.appendChild(el("span", null, "打开对话框：" + s.label));
+  box.appendChild(a);
+  const cp = el("button", "copy", "复制链接"); cp.type = "button";
+  cp.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(s.url); cp.textContent = "已复制"; }
+    catch (e) { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); cp.textContent = "已选中，手动复制"; }
+  });
+  box.appendChild(cp);
+  const code = el("code", null, s.url); box.appendChild(code);
+  if (s.inherited) box.appendChild(el("div", "path", "来自上层「" + s.from + "」"));
+  return box;
 }
 function kidList(d) {
   const box = el("div", "kids");
