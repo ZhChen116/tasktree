@@ -327,7 +327,8 @@ function sessionFor(d) {
 }
 function sessionRow(s) {
   const box = el("div", "ses");
-  const a = el("a", "sesbtn"); a.href = s.url;
+  // Open in a new tab: following a claude:// link inside the artifact frame replaces the page with a blank one.
+  const a = el("a", "sesbtn"); a.href = s.url; a.target = "_blank"; a.rel = "noopener";
   a.appendChild(el("span", "ico", "↗")); a.appendChild(el("span", null, "打开对话框：" + s.label));
   box.appendChild(a);
   const cp = el("button", "copy", "复制链接"); cp.type = "button";
