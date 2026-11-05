@@ -48,8 +48,9 @@ h1 { font-family: var(--display); font-weight: 700; font-size: 1.6rem; margin: 0
 .sep { color: var(--muted); }
 svg#pack { display: block; width: 100%; height: auto; cursor: grab; touch-action: none; }
 svg#pack:active { cursor: grabbing; }
-button.reset { position: absolute; right: 10px; bottom: 10px; z-index: 2; font: inherit; font-size: .78rem; border: 0; background: var(--pill); color: var(--accent); border-radius: 999px; padding: 4px 12px; cursor: pointer; box-shadow: 0 1px 3px var(--shadow); }
-.gesture { position: absolute; left: 12px; bottom: 12px; z-index: 2; font-size: .72rem; color: var(--muted); pointer-events: none; }
+.tools { position: absolute; right: 10px; bottom: 10px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 20px); }
+.tools button { font: inherit; font-size: .78rem; border: 0; background: var(--pill); color: var(--accent); border-radius: 999px; padding: 4px 12px; cursor: pointer; box-shadow: 0 1px 3px var(--shadow); min-width: 32px; }
+.gesture { position: absolute; left: 12px; top: 44px; z-index: 2; font-size: .72rem; color: var(--muted); pointer-events: none; }
 svg#pack .node { cursor: pointer; transition: filter .2s; }
 svg#pack .node:hover { filter: brightness(1.06); }
 svg#pack .pill rect { fill: var(--pill); }
@@ -127,8 +128,12 @@ label.tog { font-size: .78rem; color: var(--muted); display: inline-flex; gap: 6
     <div>
       <div class="stage">
         <div class="crumbs" id="crumbs" aria-label="位置"></div>
-        <button type="button" class="reset" id="resetBtn" title="回到原来的位置和大小">复位</button>
-        <div class="gesture" aria-hidden="true">拖动平移 · 双指缩放 · 点圆进入</div>
+        <div class="tools">
+          <button type="button" id="zoomIn" aria-label="放大">＋</button><button type="button" id="zoomOut" aria-label="缩小">－</button>
+          <button type="button" id="resetBtn" title="回到原来的位置和大小">复位视图</button>
+          <button type="button" id="relayoutBtn" title="这一层的圆回到自动排列">恢复默认排列</button>
+        </div>
+        <div class="gesture" aria-hidden="true">拖圆调整位置 · 拖空白平移 · 点圆进入</div>
         <svg id="pack" role="img" aria-label="所有事情的嵌套圆：大圆是工作线，里面的小圆是项目和任务。点一个圆放大进去，点空白处退出一层。"></svg>
       </div>
       <div class="legend" aria-hidden="true">
@@ -191,6 +196,59 @@ function build() {
     .sort((a, b) => (RANK[st(b)] - RANK[st(a)]) || (b.value - a.value));
   W = Math.min(document.querySelector(".stage").clientWidth || 600, 900);
   root = d3.pack().size([W, W]).padding(d => d.depth === 0 ? 14 : 6)(h);
+  restoreLayout();
+}
+
+// ----- rearranging: drag a circle; its siblings make room; the arrangement is kept on this device -----
+// Saved as each node's offset from its parent's center, in units of the parent's radius,
+// so it survives re-syncs and size changes.
+let layout = {};
+try { layout = JSON.parse(localStorage.getItem("ttLayout") || "{}"); } catch (e) { layout = {}; }
+const saveLayout = () => { try { localStorage.setItem("ttLayout", JSON.stringify(layout)); } catch (e) {} };
+function shift(d, dx, dy) { d.each(n => { n.x += dx; n.y += dy; }); }
+function keepInside(d) {
+  const p = d.parent; if (!p) return;
+  const pad = p.depth === 0 ? 14 : 6, dx = d.x - p.x, dy = d.y - p.y, dist = Math.hypot(dx, dy), lim = Math.max(0, p.r - d.r - pad);
+  if (dist > lim) { const s = lim / (dist || 1); shift(d, p.x + dx * s - d.x, p.y + dy * s - d.y); }
+}
+// Push siblings apart (circle collision) and back inside the parent; `pinned` stays where the finger is.
+function settle(p, pinned, rounds) {
+  const sib = p.children || []; if (sib.length < 2) { sib.forEach(keepInside); return; }
+  for (let it = 0; it < rounds; it++) {
+    let moved = false;
+    for (let i = 0; i < sib.length; i++) for (let j = i + 1; j < sib.length; j++) {
+      const a = sib[i], b = sib[j], dx = b.x - a.x, dy = b.y - a.y, dist = Math.hypot(dx, dy) || 0.01, need = a.r + b.r + 4;
+      if (dist >= need) continue;
+      moved = true;
+      const push = need - dist, ux = dx / dist, uy = dy / dist;
+      const wa = a === pinned ? 0 : b === pinned ? 1 : 0.5, wb = 1 - wa;
+      shift(a, -ux * push * wa, -uy * push * wa); shift(b, ux * push * wb, uy * push * wb);
+    }
+    sib.forEach(s => { if (s !== pinned) keepInside(s); });
+    if (!moved) break;
+  }
+}
+function restoreLayout() {
+  const touched = new Set();
+  root.each(d => {   // breadth-first: parents are placed before their children
+    const rel = d.parent && layout[d.data.id];
+    if (!rel) return;
+    shift(d, d.parent.x + rel[0] * d.parent.r - d.x, d.parent.y + rel[1] * d.parent.r - d.y);
+    touched.add(d.parent);
+  });
+  touched.forEach(p => settle(p, null, 80));
+}
+function remember(p) { (p.children || []).forEach(s => { layout[s.data.id] = [(s.x - p.x) / p.r, (s.y - p.y) / p.r]; }); saveLayout(); }
+const dragger = d3.drag()
+  .filter(e => !e.button && !(e.touches && e.touches.length > 1))
+  .on("drag", (e, d) => {
+    const k = W / view[2];
+    shift(d, e.dx / k, e.dy / k); keepInside(d); settle(d.parent, d, 6); apply(view);
+  })
+  .on("end", (e, d) => { settle(d.parent, null, 40); apply(view); remember(d.parent); });
+function resetLayout() {
+  const ids = new Set((focus.children || []).flatMap(c => c.descendants().map(x => x.data.id)));
+  ids.forEach(id => delete layout[id]); saveLayout(); renderAll();
 }
 
 function draw() {
@@ -214,7 +272,8 @@ function draw() {
     .attr("stroke-width", d => d.depth === 1 ? 1.6 : 1.1)
     .attr("filter", d => !d.children && d.depth ? "url(#lift)" : null)
     .attr("pointer-events", d => d.depth === 0 ? "none" : null)
-    .on("click", (ev, d) => { ev.stopPropagation(); if (d.children && d !== focus) zoom(d); else select(d); });
+    .on("click", (ev, d) => { ev.stopPropagation(); if (d.children && d !== focus) zoom(d); else select(d); })
+    .filter(d => d.depth > 0).call(dragger);
   svg.append("g").attr("class", "halos").selectAll("circle").data(all.filter(d => !d.children && d.data.node.status === "decide"), d => d.data.id).join("circle").attr("class", "halo");
   svg.append("circle").attr("class", "sel").attr("fill", "none").attr("stroke", C("fg")).attr("stroke-width", 2).attr("pointer-events", "none");
   const pills = svg.append("g").selectAll("g").data(all.filter(d => d.depth > 0), d => d.data.id).join("g").attr("class", "pill");
@@ -269,9 +328,11 @@ function select(d) { selected = d; apply(view); renderCard(); }
 // The view actually shown = the focus view (base) moved by the user's pan/pinch (ut).
 function eff() { const k = W / base[2]; return [base[0] - ut.x / (k * ut.k), base[1] - ut.y / (k * ut.k), base[2] / ut.k]; }
 const zoomer = d3.zoom().scaleExtent([0.6, 8])
-  .filter(e => e.type === "wheel" ? e.ctrlKey : !e.button)
+  // dragging a circle moves that circle (d3.drag); dragging empty space pans the view
+  .filter(e => e.type === "wheel" ? e.ctrlKey : !e.button && !(e.target && e.target.classList && e.target.classList.contains("node")))
   .on("zoom", e => { ut = e.transform; apply(eff()); });
 function resetPan() { svg.transition().duration(reduceMotion ? 0 : 400).call(zoomer.transform, d3.zoomIdentity); }
+function zoomBy(f) { svg.transition().duration(reduceMotion ? 0 : 250).call(zoomer.scaleBy, f); }
 function findById(id) { return root && root.descendants().find(d => d.data.id === id); }
 
 // ----- DOM parts -----
@@ -413,6 +474,9 @@ function renderAll() {
   document.getElementById("stamp").textContent = meta && meta.snapshot ? "最近同步 " + meta.snapshot : "还没有同步过";
 }
 document.getElementById("resetBtn").addEventListener("click", resetPan);
+document.getElementById("zoomIn").addEventListener("click", () => zoomBy(1.5));
+document.getElementById("zoomOut").addEventListener("click", () => zoomBy(1 / 1.5));
+document.getElementById("relayoutBtn").addEventListener("click", resetLayout);
 document.getElementById("hideDone").addEventListener("change", e => { hideDone = e.target.checked; try { localStorage.setItem("ttHideDone", hideDone ? "1" : "0"); } catch (x) {} renderAll(); });
 let rt = null; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => renderAll());
