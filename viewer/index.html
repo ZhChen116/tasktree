@@ -72,8 +72,8 @@ svg#pack .halo { fill: none; stroke: var(--decide); animation: halo 2.2s ease-ou
 .next b { font-weight: 500; color: var(--muted); margin-right: 6px; font-size: .78rem; letter-spacing: .06em; }
 .blk { font-size: .84rem; color: var(--blocked); }
 .ses { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
-a.sesbtn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; background: var(--accent); color: var(--panel); border-radius: 10px; padding: 7px 14px; font-size: .9rem; font-weight: 500; max-width: 100%; }
-a.sesbtn .ico { font-family: var(--mono); }
+.sesbtn { font: inherit; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; text-decoration: none; background: var(--accent); color: var(--panel); border-radius: 10px; padding: 7px 14px; font-size: .9rem; font-weight: 500; max-width: 100%; }
+.sesbtn .ico { font-family: var(--mono); }
 button.copy { font: inherit; font-size: .78rem; border: 1px solid var(--rule); background: var(--panel); color: var(--muted); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
 .ses code { flex-basis: 100%; font-family: var(--mono); font-size: .7rem; color: var(--muted); overflow-wrap: anywhere; user-select: all; }
 .ses .path { flex-basis: 100%; }
@@ -327,16 +327,16 @@ function sessionFor(d) {
 }
 function sessionRow(s) {
   const box = el("div", "ses");
-  // Open in a new tab: following a claude:// link inside the artifact frame replaces the page with a blank one.
-  const a = el("a", "sesbtn"); a.href = s.url; a.target = "_blank"; a.rel = "noopener";
-  a.appendChild(el("span", "ico", "↗")); a.appendChild(el("span", null, "打开对话框：" + s.label));
-  box.appendChild(a);
-  const cp = el("button", "copy", "复制链接"); cp.type = "button";
+  // claude:// links cannot be followed from inside the artifact frame, so the action is copy-then-paste.
+  const cp = el("button", "sesbtn"); cp.type = "button";
+  cp.appendChild(el("span", "ico", "⧉")); cp.appendChild(el("span", null, "复制对话框链接：" + s.label));
+  const tip = el("span", "path", "复制后粘贴到浏览器地址栏，就会在 Claude app 里打开");
   cp.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(s.url); cp.textContent = "已复制"; }
-    catch (e) { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); cp.textContent = "已选中，手动复制"; }
+    try { await navigator.clipboard.writeText(s.url); tip.textContent = "已复制。粘贴到浏览器地址栏，回车。"; }
+    catch (e) { const r = document.createRange(); r.selectNodeContents(code); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); tip.textContent = "复制没成功，已选中下面的链接，请手动复制。"; }
   });
   box.appendChild(cp);
+  box.appendChild(tip);
   const code = el("code", null, s.url); box.appendChild(code);
   if (s.inherited) box.appendChild(el("div", "path", "来自上层「" + s.from + "」"));
   return box;
