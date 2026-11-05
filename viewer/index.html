@@ -1,0 +1,286 @@
+<title>动态记事本</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* Layout: one column. Decisions on top, then the whole tree (status rolled up from leaves), then blockers and recent activity. */
+:root {
+  --bg: #f3f5f7; --panel: #ffffff; --fg: #1b2129; --muted: #5d6874; --rule: #dbe1e7;
+  --accent: #2f5f8f; --done: #2f7d5b; --doing: #c98a1b; --wait: #7b8590; --blocked: #b8483a; --decide: #7a4fb0;
+  --chip-bg: #edf1f4;
+  --sans: "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161b; --panel: #1a2027; --fg: #e4e9ee; --muted: #98a3ae; --rule: #2a323b;
+  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #8b96a1; --blocked: #e0796b; --decide: #b693e6; --chip-bg: #232a32; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161b; --panel: #1a2027; --fg: #e4e9ee; --muted: #98a3ae; --rule: #2a323b;
+  --accent: #86b2dc; --done: #56b98a; --doing: #e3a843; --wait: #8b96a1; --blocked: #e0796b; --decide: #b693e6; --chip-bg: #232a32; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 980px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px; display: grid; gap: 20px; }
+header { display: grid; gap: 4px; }
+h1 { font-size: 1.45rem; margin: 0; text-wrap: balance; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+h2 { font-size: 1.02rem; margin: 0 0 8px; letter-spacing: .02em; }
+.stamp { color: var(--muted); font-size: .82rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: .8rem; color: var(--muted); }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
+.s-done { background: var(--done); } .s-doing { background: var(--doing); } .s-waiting { background: var(--wait); }
+.s-blocked { background: var(--blocked); } .s-decide { background: var(--decide); }
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.cols { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.decisions { display: grid; gap: 10px; }
+.dcard { border-left: 3px solid var(--decide); padding: 6px 0 6px 12px; display: grid; gap: 6px; }
+.dcard .q { font-weight: 500; }
+.dcard .ctx { font-size: .85rem; color: var(--muted); }
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+button.opt { font: inherit; font-size: .85rem; border: 1px solid var(--rule); background: var(--chip-bg); color: var(--fg); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+button.opt:hover, button.opt:focus-visible { border-color: var(--accent); outline: none; }
+button.opt.chosen { border-color: var(--decide); color: var(--decide); font-weight: 500; }
+.answered { font-size: .82rem; color: var(--decide); }
+.empty { color: var(--muted); font-size: .9rem; }
+ul.tree, ul.tree ul { list-style: none; margin: 0; padding: 0; }
+ul.tree ul { padding-left: 18px; border-left: 1px dashed var(--rule); margin-left: 6px; }
+button.fold { font: inherit; color: inherit; background: none; border: 0; width: 100%; text-align: left; display: grid; grid-template-columns: 30px 1fr; gap: 6px; align-items: baseline; padding: 6px 0; cursor: pointer; }
+button.fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.foldhead { display: inline-flex; gap: 6px; align-items: baseline; }
+.caret { width: 10px; color: var(--muted); font-size: .8rem; }
+.leaf { display: grid; grid-template-columns: 30px 1fr; gap: 6px; align-items: baseline; padding: 6px 0; }
+.leaf .dot { margin: 0; justify-self: end; }
+.ttl { font-weight: 500; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.chip { font-size: .74rem; padding: 1px 8px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); white-space: nowrap; }
+.chip.st { color: var(--fg); }
+.count { font-family: var(--mono); font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.next { font-size: .85rem; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.next b { color: var(--fg); font-weight: 500; }
+.blk { font-size: .8rem; color: var(--blocked); margin-top: 2px; }
+a { color: var(--accent); }
+.links { font-size: .8rem; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 2px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+button.tb { font: inherit; font-size: .8rem; border: 1px solid var(--rule); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+button.zoom { font: inherit; font-size: .74rem; border: 1px solid var(--rule); background: var(--panel); color: var(--accent); border-radius: 6px; padding: 0 8px; margin: 0 0 4px 36px; cursor: pointer; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-size: .82rem; color: var(--muted); margin-bottom: 8px; }
+.crumbs button { font: inherit; border: 0; background: none; color: var(--accent); padding: 0; cursor: pointer; text-decoration: underline; }
+.crumbs b { color: var(--fg); font-weight: 500; }
+ol.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+ol.log li { display: grid; grid-template-columns: 7.2em 1fr; gap: 8px; font-size: .86rem; min-width: 0; }
+ol.log time { font-family: var(--mono); font-size: .76rem; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+ol.log span { overflow-wrap: anywhere; }
+#refreshBtn { border: 1px solid var(--rule); background: var(--panel); color: var(--accent); border-radius: 999px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+#refreshMsg { font-size: .8rem; font-weight: 400; color: var(--muted); }
+.note { font-size: .8rem; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1 id="treeTitle">动态记事本<button id="refreshBtn" type="button" title="让 Claude 同步" aria-label="让 Claude 同步"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><span id="refreshMsg"></span></h1>
+    <div class="stamp" id="stamp">正在读取…</div>
+    <div class="legend">
+      <span><i class="dot s-decide"></i>等你决定</span><span><i class="dot s-blocked"></i>卡住</span>
+      <span><i class="dot s-doing"></i>在做</span><span><i class="dot s-waiting"></i>等待</span><span><i class="dot s-done"></i>完成</span>
+    </div>
+  </header>
+
+  <section class="panel" aria-labelledby="h-dec">
+    <h2 id="h-dec">等你决定</h2>
+    <div class="decisions" id="decisions"><div class="empty">读取中。</div></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-tree">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+      <h2 id="h-tree">全部事情</h2>
+      <div class="toolbar"><button class="tb" id="expandAll" type="button">全部展开</button><button class="tb" id="focusOpen" type="button">只展开未完成</button></div>
+    </div>
+    <div class="crumbs" id="crumbs" hidden></div>
+    <ul class="tree" id="tree"><li class="empty">Claude 同步数据后，这里按"工作线 › 项目 › 任务"显示所有事情。</li></ul>
+  </section>
+
+  <div class="cols">
+    <section class="panel" aria-labelledby="h-blk">
+      <h2 id="h-blk">卡在什么上</h2>
+      <div id="blockers" class="empty">读取中。</div>
+    </section>
+    <section class="panel" aria-labelledby="h-log">
+      <h2 id="h-log">最近动态</h2>
+      <ol class="log" id="log"><li class="empty">读取中。</li></ol>
+    </section>
+  </div>
+
+  <p class="note">数据存在 ZH 电脑上的 TaskTree（事件日志），这个页面是 Claude 同步过来的只读副本。同一层里按状态排序，等你决定和卡住的在前，完成的在最后。父项的状态由子项汇总：有子项卡住，父项就显示卡住；子项全部完成才算完成。点决定的选项会记下你的选择，Claude 下次同步时写回 TaskTree。</p>
+</div>
+
+<script>
+const ST = { done: "完成", doing: "在做", waiting: "等待", blocked: "卡住", decide: "等你决定" };
+const RANK = { decide: 5, blocked: 4, doing: 3, waiting: 2, done: 1 };
+const VIEW = { decide: 0, blocked: 1, doing: 2, waiting: 3, done: 4 };
+const TYPE = { workstream: "工作线", project: "项目", decision: "决定", deliverable: "交付物", job: "作业" };
+let nodes = {}, meta = null, db = null, openState = {}, focusId = null;
+try { openState = JSON.parse(localStorage.getItem("tasktreeOpen") || "{}"); } catch (e) { openState = {}; }
+const saveOpen = () => { try { localStorage.setItem("tasktreeOpen", JSON.stringify(openState)); } catch (e) {} };
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+function kids(id) { return Object.values(nodes).filter(n => (n.parent || null) === id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
+// Same rule as tasktree/model.py rollup()
+function rollup(n, seen = new Set()) {
+  if (seen.has(n.id)) return n.status || "waiting"; seen.add(n.id);
+  const ks = kids(n.id);
+  if (!ks.length) return n.status || "waiting";
+  const sts = ks.map(k => rollup(k, seen));
+  if (sts.every(s => s === "done")) return ["doing", "blocked", "decide"].includes(n.status) ? n.status : "done";
+  let best = "waiting"; for (const s of sts) if (s !== "done" && RANK[s] > RANK[best]) best = s;
+  if (n.status && n.status !== "done" && RANK[n.status] > RANK[best]) best = n.status;
+  return best;
+}
+// "MM-DD"; Jan-Jun count as the following year so a span across New Year sorts right
+function dkey(d) { if (!/^\d\d-\d\d$/.test(d || "")) return ""; return (+d.slice(0, 2) < 7 ? "1" : "0") + d; }
+function latest(n, seen = new Set()) {
+  if (seen.has(n.id)) return n.updated || n.date || ""; seen.add(n.id);
+  let best = n.updated || n.date || "";
+  for (const k of kids(n.id)) { const d = latest(k, seen); if (dkey(d) > dkey(best)) best = d; }
+  return best;
+}
+function viewSort(list) { return list.slice().sort((a, b) => (VIEW[rollup(a)] - VIEW[rollup(b)]) || (dkey(latest(b)) > dkey(latest(a)) ? 1 : dkey(latest(b)) < dkey(latest(a)) ? -1 : 0) || ((a.order ?? 0) - (b.order ?? 0))); }
+function leafCount(n) { const ks = kids(n.id); if (!ks.length) return [n.status === "done" ? 1 : 0, 1]; return ks.reduce((a, k) => { const [d, t] = leafCount(k); return [a[0] + d, a[1] + t]; }, [0, 0]); }
+
+function nodeBody(n, st) {
+  const box = el("div");
+  box.appendChild(el("div", "ttl", n.title || n.id));
+  const m = el("div", "meta");
+  if (n.date) { const last = latest(n); m.appendChild(el("span", "chip", n.date + (last && last !== n.date ? " → " + last : ""))); }
+  m.appendChild(el("span", "chip st", ST[st] || st));
+  if (n.owner) m.appendChild(el("span", "chip", n.owner));
+  if (TYPE[n.type]) m.appendChild(el("span", "chip", TYPE[n.type]));
+  if (kids(n.id).length) { const [d, t] = leafCount(n); m.appendChild(el("span", "count", d + "/" + t)); }
+  box.appendChild(m);
+  if (n.next && st !== "done") { const p = el("div", "next"); p.appendChild(el("b", null, "下一步 ")); p.appendChild(document.createTextNode(n.next)); box.appendChild(p); }
+  const bl = (n.blocked_by || []).filter(id => nodes[id] && rollup(nodes[id]) !== "done");
+  if (bl.length) box.appendChild(el("div", "blk", "等 " + bl.map(id => nodes[id].title).join("、")));
+  if (Array.isArray(n.links) && n.links.length) {
+    const L = el("div", "links");
+    n.links.forEach(l => { if (l && l.url && /^https:\/\//.test(l.url)) { const a = el("a", null, l.label || "链接"); a.href = l.url; a.target = "_blank"; a.rel = "noopener"; L.appendChild(a); } else if (l && l.label) L.appendChild(el("span", "chip", l.label)); });
+    box.appendChild(L);
+  }
+  return box;
+}
+function renderNode(n) {
+  const li = el("li"); const st = rollup(n); const ks = kids(n.id);
+  const dot = el("i", "dot s-" + st);
+  if (!ks.length) { const row = el("div", "leaf"); row.appendChild(dot); row.appendChild(nodeBody(n, st)); li.appendChild(row); return li; }
+  const isOpen = openState[n.id] ?? (st !== "done");
+  const row = el("button", "fold"); row.type = "button"; row.setAttribute("aria-expanded", String(isOpen));
+  const car = el("span", "caret", isOpen ? "▾" : "▸");
+  const head = el("span", "foldhead"); head.appendChild(car); head.appendChild(dot);
+  row.appendChild(head); row.appendChild(nodeBody(n, st));
+  const ul = el("ul"); ul.hidden = !isOpen; viewSort(ks).forEach(k => ul.appendChild(renderNode(k)));
+  row.addEventListener("click", ev => {
+    if (ev.target.closest("a")) return;
+    const o = ul.hidden; ul.hidden = !o; car.textContent = o ? "▾" : "▸"; row.setAttribute("aria-expanded", String(o));
+    openState[n.id] = o; saveOpen();
+  });
+  li.appendChild(row);
+  if (n.id !== focusId && n.parent) { const z = el("button", "zoom", "单独看这一支 ↗"); z.type = "button"; z.addEventListener("click", () => setFocus(n.id)); li.appendChild(z); }
+  li.appendChild(ul);
+  return li;
+}
+function setFocus(id) { focusId = id || null; if (focusId) openState[focusId] = true; render(); document.getElementById("h-tree").scrollIntoView({ block: "start" }); }
+function renderCrumbs() {
+  const c = document.getElementById("crumbs"); c.textContent = "";
+  const f = focusId && nodes[focusId];
+  if (!f) { c.hidden = true; return; }
+  c.hidden = false;
+  const all = el("button", null, "全部"); all.type = "button"; all.addEventListener("click", () => setFocus(null)); c.appendChild(all);
+  const path = []; let p = f.parent && nodes[f.parent]; while (p) { path.unshift(p); p = p.parent && nodes[p.parent]; }
+  path.forEach(a => { c.appendChild(document.createTextNode(" › ")); const b = el("button", null, a.title); b.type = "button"; b.addEventListener("click", () => setFocus(a.id)); c.appendChild(b); });
+  c.appendChild(document.createTextNode(" › ")); c.appendChild(el("b", null, f.title));
+}
+function renderDecisions() {
+  const box = document.getElementById("decisions"); box.textContent = "";
+  const ds = Object.values(nodes).filter(n => n.type === "decision" && n.status === "decide");
+  if (!ds.length) { box.appendChild(el("div", "empty", "现在没有等你决定的事。")); return; }
+  ds.forEach(n => {
+    const c = el("div", "dcard"); c.appendChild(el("div", "q", n.title));
+    const path = []; let p = n.parent && nodes[n.parent]; while (p) { path.unshift(p.title); p = p.parent && nodes[p.parent]; }
+    if (n.next || path.length) c.appendChild(el("div", "ctx", (path.length ? path.join(" › ") + "。" : "") + (n.next || "")));
+    const opts = el("div", "opts");
+    (n.options || []).forEach(o => { const b = el("button", "opt" + (n.answer === o ? " chosen" : ""), o); b.type = "button"; b.addEventListener("click", () => choose(n, o, b)); opts.appendChild(b); });
+    c.appendChild(opts);
+    if (n.answer) c.appendChild(el("div", "answered", "已选：" + n.answer + "（Claude 下次同步时写回）"));
+    box.appendChild(c);
+  });
+}
+async function choose(n, o, btn) {
+  if (!db) return;
+  btn.disabled = true;
+  try {
+    await db.collection("nodes").doc(n.id).update({ answer: o, answered_at: new Date().toISOString() });
+    try {
+      const c = await claude.use("comments");
+      if (c && (await c.canSendToClaude()) === "available") await c.sendToClaude({ anchor: await c.anchorFor(document.getElementById("h-dec")), text: "决定 " + n.id + "：" + o });
+    } catch (e) {}
+  } catch (e) {
+    btn.disabled = false;
+    btn.parentNode.after(el("div", "answered", "没记上（" + ((e && e.code) || "错误") + "），可以在评论里写给 Claude。"));
+  }
+}
+function renderBlockers() {
+  const box = document.getElementById("blockers"); box.textContent = ""; box.className = "";
+  const rows = Object.values(nodes).filter(n => rollup(n) !== "done" && (n.blocked_by || []).some(id => nodes[id] && rollup(nodes[id]) !== "done"));
+  if (!rows.length) { box.className = "empty"; box.textContent = "没有被卡住的事情。"; return; }
+  const ul = el("ul", "tree");
+  rows.forEach(n => {
+    const li = el("li"); const row = el("div", "leaf"); row.appendChild(el("i", "dot s-" + rollup(n)));
+    const b = el("div"); b.appendChild(el("div", "ttl", n.title));
+    b.appendChild(el("div", "blk", "等 " + n.blocked_by.filter(id => nodes[id] && rollup(nodes[id]) !== "done").map(id => nodes[id].title + "（" + ST[rollup(nodes[id])] + "）").join("、")));
+    row.appendChild(b); li.appendChild(row); ul.appendChild(li);
+  });
+  box.appendChild(ul);
+}
+function renderLog() {
+  const ol = document.getElementById("log"); ol.textContent = "";
+  const rows = (meta && Array.isArray(meta.recent)) ? meta.recent : [];
+  if (!rows.length) { ol.appendChild(el("li", "empty", "还没有动态。")); return; }
+  rows.slice(0, 25).forEach(r => { const li = el("li"); li.appendChild(el("time", null, r.ts || "")); li.appendChild(el("span", null, r.text || "")); ol.appendChild(li); });
+}
+function render() {
+  const t = document.getElementById("tree"); t.textContent = "";
+  if (focusId && !nodes[focusId]) focusId = null;
+  renderCrumbs();
+  const roots = focusId ? [nodes[focusId]] : kids(null);
+  if (!roots.length) t.appendChild(el("li", "empty", "还没有数据。在任何一个 Claude session 里说“同步记事本”，这里就会显示所有事情。"));
+  viewSort(roots).forEach(r => t.appendChild(renderNode(r)));
+  renderDecisions(); renderBlockers(); renderLog();
+  document.getElementById("stamp").textContent = meta && meta.snapshot ? "最近同步 " + meta.snapshot : "还没有同步过";
+}
+document.getElementById("expandAll").addEventListener("click", () => { Object.keys(nodes).forEach(id => openState[id] = true); saveOpen(); render(); });
+document.getElementById("focusOpen").addEventListener("click", () => { openState = {}; saveOpen(); render(); });
+
+(async () => {
+  try { db = await claude.use("db"); } catch (e) { db = null; }
+  if (!db) { document.getElementById("stamp").textContent = "这个视图读不到数据（需要登录并打开原链接）。"; return; }
+  db.collection("nodes").onSnapshot(snap => {
+    const next = {}; let m = null;
+    snap.docs.forEach(d => { const v = d.data(); if (!v) return; if (d.id === "_meta") m = v; else next[d.id] = Object.assign({ id: d.id }, v); });
+    nodes = next; meta = m; render();
+  }, err => { document.getElementById("stamp").textContent = "读取失败（" + ((err && err.code) || "错误") + "）。"; });
+})();
+
+(async () => {
+  const btn = document.getElementById("refreshBtn"), msg = document.getElementById("refreshMsg");
+  let c = null;
+  try { c = await claude.use("comments"); } catch (e) { c = null; }
+  btn.addEventListener("click", async () => {
+    if (!c) { msg.textContent = "这个视图不能发给 Claude，请在评论里写“同步记事本”"; return; }
+    btn.disabled = true; msg.textContent = "正在发给 Claude…";
+    let ok = false, code = "";
+    try {
+      if ((await c.canSendToClaude()) === "available") { await c.sendToClaude({ anchor: await c.anchorFor(document.getElementById("treeTitle")), text: "同步记事本" }); ok = true; }
+      else code = "no_session";
+    } catch (e) { code = (e && e.code) || "error"; }
+    btn.disabled = false;
+    if (ok) { msg.textContent = "已发给 Claude，同步后页面会自己刷新"; return; }
+    try { const r = await c.openComposer({ element: document.getElementById("treeTitle") }); msg.textContent = r && r.opened ? "已打开评论框：写“同步记事本”，点 Send to Claude" : "发送没成功（" + code + "）"; }
+    catch (e2) { msg.textContent = "发送没成功（" + code + "），请在评论里写“同步记事本”"; }
+  });
+})();
+</script>
