@@ -1,6 +1,6 @@
 # TaskTree design notes
 
-This document walks through the 8 questions of a small backend system design checklist to explain why TaskTree is built the way it is. It has the same skeleton as the classic "rewards checker" exercise: **a stream of events comes in → each is applied in order → state in a database is updated → someone queries it**. The differences are that the state here is a tree, and the producers are several Claude sessions running at the same time.
+This document walks through the 8 questions of a small backend system design checklist to explain why TaskTree is built the way it is. 
 
 ## 0. A concrete example first
 
